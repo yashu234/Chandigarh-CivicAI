@@ -95,4 +95,10 @@ export function validateStatusTransition(
       );
     }
   }
+
+  if (note && note.trim().length > 2000) {
+    throw new StatusTransitionError(
+      'Status transition note exceeds maximum allowable length of 2000 characters.'
+    );
+  }
 }

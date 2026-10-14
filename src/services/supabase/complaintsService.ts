@@ -61,13 +61,21 @@ export const complaintsService = {
 
     try {
       // Check whether querying by UUID or tracking ID
-      const query = supabase
-        .from('complaints')
-        .select('*, complaint_evidence(*), ai_assessments(*)')
-        .or(`id.eq.${idOrTrackingId},tracking_id.eq.${idOrTrackingId}`)
-        .maybeSingle();
+      const isUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrTrackingId);
+      const safeParam = idOrTrackingId.replace(/[^a-zA-Z0-9-]/g, '');
 
-      const { data, error } = await query;
+      let query = supabase
+        .from('complaints')
+        .select('*, complaint_evidence(*), ai_assessments(*)');
+
+      if (isUuid) {
+        query = query.eq('id', safeParam);
+      } else {
+        query = query.eq('tracking_id', safeParam);
+      }
+
+      const { data, error } = await query.maybeSingle();
       if (error) return { data: null, error: new Error(error.message) };
       if (!data) return { data: null, error: new Error('Complaint not found') };
 

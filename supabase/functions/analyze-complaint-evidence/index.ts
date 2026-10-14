@@ -69,6 +69,16 @@ function validateAndSanitizeScores(raw: unknown) {
     throw new Error('Model output missing "reasoning_summary".');
   }
 
+  if (obj.reasoning_summary.trim().length > 2500) {
+    throw new Error('Model reasoning summary exceeds maximum allowable length (2500 chars).');
+  }
+  if (obj.detected_issue.trim().length > 500) {
+    throw new Error('Model detected_issue exceeds maximum allowable length (500 chars).');
+  }
+  if (obj.suggested_category.trim().length > 200) {
+    throw new Error('Model suggested_category exceeds maximum allowable length (200 chars).');
+  }
+
   const dimensions: Array<{ key: keyof RawModelOutput; label: string }> = [
     { key: 'severity', label: 'severity' },
     { key: 'safety_risk', label: 'safety_risk' },
@@ -297,7 +307,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // 8. Retrieve private image from Supabase Storage
-    const bucket = Deno.env.get('VITE_SUPABASE_EVIDENCE_BUCKET') || 'complaint-evidence';
+    const bucket = Deno.env.get('SUPABASE_EVIDENCE_BUCKET') || Deno.env.get('VITE_SUPABASE_EVIDENCE_BUCKET') || 'complaint-evidence';
     const { data: fileBlob, error: downloadError } = await adminClient.storage
       .from(bucket)
       .download(evidence.storage_path);
@@ -530,12 +540,14 @@ Please analyze the attached civic grievance photograph and citizen statement:
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('[EdgeFunction] Unexpected error:', message);
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    console.error('[EdgeFunction] Unexpected error:', rawMessage);
+    const isSensitive = /syntax error|pg_|auth\.|password|secret|key|bearer|token|stack trace|at line/i.test(rawMessage);
+    const safeError = isSensitive ? 'Internal server error during evidence analysis.' : rawMessage;
     return new Response(
       JSON.stringify({
         state: 'failed',
-        error: message || 'Internal server error during evidence analysis.',
+        error: safeError || 'Internal server error during evidence analysis.',
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

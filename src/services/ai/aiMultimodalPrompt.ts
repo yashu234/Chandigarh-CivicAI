@@ -133,6 +133,9 @@ export function validateAndSanitizeAIOutput(raw: unknown): {
   if (typeof obj.reasoning_summary !== 'string' || !obj.reasoning_summary.trim()) {
     return { isValid: false, data: null, error: 'Missing or invalid "reasoning_summary" field.' };
   }
+  if (obj.reasoning_summary.trim().length > 2500) {
+    return { isValid: false, data: null, error: 'Reasoning summary is excessively long (exceeds 2500 characters).' };
+  }
 
   // Validate numeric score dimensions (0.00 to 100.00)
   const scoreKeys: Array<{ key: keyof RawAIModelOutput; label: string }> = [

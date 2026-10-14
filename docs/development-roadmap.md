@@ -1,6 +1,6 @@
 # Chandigarh CivicAI — Development Roadmap
 
-This document outlines the 12 sequential development phases for building Chandigarh CivicAI. Each phase builds systematically on previous deliverables without jumping ahead.
+This document outlines the 13 sequential development phases for building Chandigarh CivicAI. Each phase builds systematically on previous deliverables without jumping ahead.
 
 ---
 
@@ -8,18 +8,19 @@ This document outlines the 12 sequential development phases for building Chandig
 
 | Phase | Title | Scope | Status |
 | :---: | :--- | :--- | :---: |
-| **Phase 1** | **Frontend Foundation** | React 19, Vite, TypeScript, Tailwind CSS, Reusable UI, Routing, 10 Placeholder Pages, Documentation | **COMPLETED** |
-| **Phase 2** | **Database & Backend** | PostgreSQL / Supabase schema, migrations, RLS policies, table relations | *Pending* |
-| **Phase 3** | **Authentication** | Citizen and Administrator authentication, role-based route guards, session management | *Pending* |
-| **Phase 4** | **Complaint Submission** | Citizen grievance form state, validation, location tagging, submission endpoint | *Pending* |
-| **Phase 5** | **Image Storage** | Photographic evidence upload pipeline, size/format validation, CDN/storage bucket | *Pending* |
-| **Phase 6** | **AI Analysis Pipeline** | Multimodal model inference for detected issue, severity, safety risk, evidence support, and image quality | *Pending* |
-| **Phase 7** | **Deterministic Priority Engine** | Rule-based scoring formula combining severity, risk, impact, and evidence support weight | *Pending* |
-| **Phase 8** | **Admin Dashboard** | Live prioritized queue, department assignment, workload tracking, status transition controls | *Pending* |
-| **Phase 9** | **Duplicate & Recurring Issue Detection** | Geospatial and text similarity clustering to link related complaints in the same sector | *Pending* |
-| **Phase 10** | **Citizen Tracking** | Real-time status tracker, SMS/in-app notification milestones, timeline audits | *Pending* |
-| **Phase 11** | **Security & Testing** | Comprehensive unit, integration, and E2E tests, input sanitization, security audits | *Pending* |
-| **Phase 12** | **Deployment & Production Readiness** | Production build optimization, CI/CD pipeline, staging & production hosting, observability | *Pending* |
+| **Phase 1** | **Frontend Foundation** | React 19, Vite, TypeScript, Tailwind CSS, Reusable UI, Routing, 10 Placeholder Pages, Documentation | **✅ COMPLETED** |
+| **Phase 2** | **Database & Backend** | PostgreSQL / Supabase schema, migrations, RLS policies, table relations | **✅ COMPLETED** |
+| **Phase 3** | **Authentication** | Citizen and Administrator authentication, role-based route guards, session management | **✅ COMPLETED** |
+| **Phase 4** | **Complaint Submission** | Citizen grievance form state, validation, location tagging, submission endpoint | **✅ COMPLETED** |
+| **Phase 5** | **Image Storage** | Photographic evidence upload pipeline, size/format validation, CDN/storage bucket, atomic tracking ID | **✅ COMPLETED** |
+| **Phase 6** | **AI Analysis Pipeline** | Multimodal model inference for detected issue, severity, safety risk, evidence support, and image quality | **✅ COMPLETED** |
+| **Phase 7** | **Deterministic Priority Engine** | Rule-based scoring formula combining severity, risk, impact, and evidence support weight | **✅ COMPLETED** |
+| **Phase 8** | **Admin Dashboard** | Live prioritized queue, department assignment, workload tracking, status transition controls | **✅ COMPLETED** |
+| **Phase 9** | **Duplicate & Recurring Issue Detection** | Geospatial and text similarity clustering to link related complaints in the same sector | **✅ COMPLETED** |
+| **Phase 10** | **Citizen Tracking** | Real-time status tracker, in-app notification milestones, timeline audits | **✅ COMPLETED** |
+| **Phase 11** | **Notifications** | Citizen notification system with idempotent event_key, notification immutability, read-state management | **✅ COMPLETED** |
+| **Phase 12** | **Security Hardening & Testing** | Comprehensive security tests (28 tests), RLS audit, XSS prevention, injection prevention, notification trigger | **✅ COMPLETED** |
+| **Phase 13** | **Deployment & Demo Readiness** | Production build optimization, Vercel deployment, Supabase remote verification, demo seed data, deployment guide | **✅ COMPLETED** |
 
 ---
 

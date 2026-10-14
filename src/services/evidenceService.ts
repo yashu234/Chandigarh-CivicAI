@@ -69,9 +69,16 @@ export function validateEvidenceFile(file: File): EvidenceValidationResult {
  * complaints/{complaint_uuid}/{uuid}-{safe_filename}
  */
 export function generateEvidenceStoragePath(complaintId: string, filename: string): string {
+  if (!complaintId || typeof complaintId !== 'string') {
+    throw new Error('Valid complaintId is required to generate evidence storage path.');
+  }
+  const safeComplaintId = complaintId.replace(/[^a-zA-Z0-9-]/g, '');
+  if (!safeComplaintId) {
+    throw new Error('Invalid complaintId for evidence storage path.');
+  }
   const fileId = crypto.randomUUID();
-  const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
-  return `complaints/${complaintId}/${fileId}-${safeFilename}`;
+  const safeFilename = filename.replace(/\.\./g, '_').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+  return `complaints/${safeComplaintId}/${fileId}-${safeFilename}`;
 }
 
 /**

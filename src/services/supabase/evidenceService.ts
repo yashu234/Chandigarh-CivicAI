@@ -30,9 +30,10 @@ export const evidenceService = {
 
     try {
       // Generate clean predictable unique path: complaints/{complaint_id}/{uuid}-{sanitizedFilename}
+      const safeComplaintId = complaintId.replace(/[^a-zA-Z0-9-]/g, '');
       const fileId = crypto.randomUUID();
-      const sanitizedName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storagePath = `complaints/${complaintId}/${fileId}-${sanitizedName}`;
+      const sanitizedName = file.name.replace(/\.\./g, '_').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+      const storagePath = `complaints/${safeComplaintId}/${fileId}-${sanitizedName}`;
 
       // 1. Upload to private Supabase Storage bucket
       const { error: uploadError } = await supabase.storage

@@ -497,11 +497,16 @@ export async function getDuplicateSuggestionsForComplaint(
   }
 
   try {
+    const safeComplaintId = complaintId.replace(/[^a-zA-Z0-9-]/g, '');
+    if (!safeComplaintId) {
+      return { data: [], error: new Error('Invalid complaintId provided.') };
+    }
+
     // Fetch suggestions where complaint is either A or B
     const { data: rows, error: fetchErr } = await supabase
       .from('complaint_duplicates')
       .select('*')
-      .or(`complaint_a_id.eq.${complaintId},complaint_b_id.eq.${complaintId}`)
+      .or(`complaint_a_id.eq.${safeComplaintId},complaint_b_id.eq.${safeComplaintId}`)
       .order('similarity_score', { ascending: false });
 
     if (fetchErr) throw fetchErr;
@@ -576,6 +581,10 @@ export async function dismissDuplicateSuggestion(
   try {
     const { userId } = await verifyAdminSession();
 
+    if (note && note.trim().length > 2000) {
+      throw new Error('Dismissal note exceeds maximum allowable length of 2000 characters.');
+    }
+
     if (!isSupabaseConfigured()) {
       return { success: true, error: null };
     }
@@ -638,6 +647,9 @@ export async function confirmDuplicateSuggestion(
     const trimmedReason = reason?.trim();
     if (!trimmedReason || trimmedReason.length < 5) {
       throw new Error('Confirming a duplicate complaint requires a mandatory justification reason (min 5 characters).');
+    }
+    if (trimmedReason.length > 2000) {
+      throw new Error('Duplicate justification reason exceeds maximum allowable length of 2000 characters.');
     }
 
     // 1. Transition duplicate complaint status using Phase 9 state machine

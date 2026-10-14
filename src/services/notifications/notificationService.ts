@@ -322,6 +322,9 @@ export async function markAllNotificationsAsRead(): Promise<{
 export async function createNotification(
   params: CreateNotificationParams
 ): Promise<{ success: boolean; id?: string; error: Error | null }> {
+  const safeTitle = params.title?.slice(0, 255) || 'Municipal Update';
+  const safeMessage = params.message?.slice(0, 2000) || '';
+
   const eventKey =
     params.eventKey ||
     `${params.notificationType}_${params.complaintId || 'gen'}_${params.metadata?.status || 'event'}`;
@@ -335,8 +338,8 @@ export async function createNotification(
         userId: params.userId,
         complaintId: params.complaintId || null,
         notificationType: params.notificationType,
-        title: params.title,
-        message: params.message,
+        title: safeTitle,
+        message: safeMessage,
         readAt: null,
         createdAt: new Date().toISOString(),
         metadata: params.metadata || {},
@@ -359,8 +362,8 @@ export async function createNotification(
           user_id: params.userId,
           complaint_id: params.complaintId || null,
           notification_type: params.notificationType,
-          title: params.title,
-          message: params.message,
+          title: safeTitle,
+          message: safeMessage,
           metadata: params.metadata || {},
           event_key: eventKey,
         },

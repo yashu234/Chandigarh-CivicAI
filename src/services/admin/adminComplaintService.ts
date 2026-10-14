@@ -792,6 +792,9 @@ export async function overridePriority(
     if (!reason || reason.trim().length < 5) {
       throw new Error('Administrative priority override requires a mandatory justification reason (min 5 characters).');
     }
+    if (reason.trim().length > 2000) {
+      throw new Error('Administrative priority override reason exceeds maximum allowable length of 2000 characters.');
+    }
 
     // 1. Fetch current complaint priority
     const { data: complaint, error: fetchErr } = await supabase

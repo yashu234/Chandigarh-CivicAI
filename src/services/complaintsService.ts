@@ -70,10 +70,16 @@ export function validateComplaintInput(input: CreateComplaintInput): string | nu
   if (!input.sector || !input.sector.trim()) {
     return 'Please specify the Chandigarh sector.';
   }
+  if (input.landmark && input.landmark.trim().length > 255) {
+    return 'Landmark must be 255 characters or fewer.';
+  }
+  if (input.streetAddress && input.streetAddress.trim().length > 500) {
+    return 'Street address must be 500 characters or fewer.';
+  }
 
   if (input.evidenceFile) {
     const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (!validTypes.includes(input.evidenceFile.type)) {
+    if (!validTypes.includes(input.evidenceFile.type.toLowerCase())) {
       return 'Unsupported image format. Allowed formats: JPG, JPEG, PNG, WEBP.';
     }
     if (input.evidenceFile.size > 10 * 1024 * 1024) {
