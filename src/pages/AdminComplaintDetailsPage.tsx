@@ -162,33 +162,8 @@ export const AdminComplaintDetailsPage: React.FC = () => {
   }, [id]);
 
   useEffect(() => {
-    let isMounted = true;
-    const fetchDetail = async () => {
-      if (!id) return;
-      setIsLoading(true);
-
-      const { data: liveResult } = await getAdminComplaintDetails(id);
-      if (!isMounted) return;
-
-      if (liveResult) {
-        setDetailData(liveResult);
-        setIsLiveRecord(true);
-        setIsLoading(false);
-        return;
-      }
-
-      // Fall back to demo data
-      const mock = getMockComplaintById(id) || MOCK_COMPLAINTS[0];
-      setDemoComplaint(mock);
-      setIsLiveRecord(false);
-      computeDemoDuplicatesAndRecurrence(mock);
-      setIsLoading(false);
-    };
-    fetchDetail();
-    return () => {
-      isMounted = false;
-    };
-  }, [id]);
+    loadDetails();
+  }, [loadDetails]);
 
   const activeComplaint = detailData?.complaint ?? demoComplaint;
   const activeDuplicates = isLiveRecord
@@ -450,10 +425,11 @@ export const AdminComplaintDetailsPage: React.FC = () => {
   const allowedNextStatuses = getAllowedTransitions(activeComplaint.status);
 
   return (
-    <PageContainer
-      maxWidth="xl"
-      headerTitle={`Administrative Triage: ${activeComplaint.trackingNumber}`}
-      headerDescription="Multimodal evidence review, priority verification, department dispatch, and field remediation oversight."
+    <div className="page-enter py-4 sm:py-6">
+      <PageContainer
+        maxWidth="xl"
+        headerTitle={`Administrative Triage: ${activeComplaint.trackingNumber}`}
+        headerDescription="Multimodal evidence review, priority verification, department dispatch, and field remediation oversight."
       headerAction={
         <div className="flex items-center gap-2">
           <Link to={ROUTES.ADMIN_DASHBOARD}>
@@ -1677,5 +1653,6 @@ export const AdminComplaintDetailsPage: React.FC = () => {
         </div>
       </Modal>
     </PageContainer>
+    </div>
   );
 };

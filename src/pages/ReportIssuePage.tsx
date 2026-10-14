@@ -346,7 +346,7 @@ export const ReportIssuePage: React.FC = () => {
                 id="issue-category"
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full rounded-md border border-slate-300 bg-white text-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="civic-select"
                 required
               >
                 <option value="" disabled>
@@ -505,7 +505,7 @@ export const ReportIssuePage: React.FC = () => {
                   id="sector-select"
                   value={sector}
                   onChange={(e) => setSector(e.target.value)}
-                  className="w-full rounded-md border border-slate-300 bg-white text-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="civic-select"
                   required
                 >
                   {CHANDIGARH_SECTORS.map((sec) => (
@@ -537,26 +537,46 @@ export const ReportIssuePage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                Location Selection (UI Placeholder)
+              <label className="block text-xs font-bold text-slate-600 uppercase tracking-widest mb-1.5">
+                Sector Map Reference
               </label>
-              <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 text-xs text-slate-600">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                    <MapPin className="h-4 w-4 text-blue-600" />
-                    Target Sector Grid: {sector}
+              <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs">
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 text-white">
+                  <span className="flex items-center gap-2 text-xs font-bold">
+                    <MapPin className="h-3.5 w-3.5 text-sky-400" />
+                    Target: {sector}, Union Territory of Chandigarh
                   </span>
-                  <span className="text-[11px] text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
-                    Geospatial Pinpoint
-                  </span>
+                  <span className="text-[10px] text-sky-400 font-semibold tracking-wide uppercase">30.7333° N, 76.7794° E</span>
                 </div>
 
-                <div className="bg-slate-200/70 border border-slate-300 rounded h-24 flex flex-col items-center justify-center text-center p-4">
-                  <Navigation className="h-5 w-5 text-slate-400 mb-1" />
-                  <span className="font-medium text-slate-700">Geospatial Sector Grid</span>
-                  <span className="text-[11px] text-slate-500 mt-0.5">
-                    Coordinates map to {sector}, Union Territory of Chandigarh
-                  </span>
+                {/* Sector grid visual */}
+                <div className="relative bg-gradient-to-br from-sky-50 to-slate-100 p-5 h-40 flex items-center justify-center overflow-hidden">
+                  {/* Background grid lines */}
+                  <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(rgba(14,165,233,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(14,165,233,0.08) 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
+
+                  {/* Center pin */}
+                  <div className="relative z-10 flex flex-col items-center gap-2">
+                    <div className="h-12 w-12 rounded-full bg-sky-500/20 border-2 border-sky-500 flex items-center justify-center animate-pulse">
+                      <MapPin className="h-6 w-6 text-sky-600" />
+                    </div>
+                    <div className="bg-slate-900 text-white text-[11px] font-bold px-3 py-1 rounded-full shadow-md">
+                      {sector} · Chandigarh UT
+                    </div>
+                  </div>
+
+                  {/* Decorative sector labels */}
+                  <div className="absolute top-3 left-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">Sec 16</div>
+                  <div className="absolute top-3 right-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">Sec 18</div>
+                  <div className="absolute bottom-3 left-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">Sec 22</div>
+                  <div className="absolute bottom-3 right-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">Sec 24</div>
+                </div>
+
+                <div className="px-4 py-2 bg-sky-50 border-t border-sky-200">
+                  <p className="text-[11px] text-sky-700 font-medium flex items-center gap-1">
+                    <Navigation className="h-3 w-3" />
+                    Location will be associated with your selected sector above. Add a landmark or street address above for precise field crew routing.
+                  </p>
                 </div>
               </div>
             </div>
@@ -564,30 +584,23 @@ export const ReportIssuePage: React.FC = () => {
         </Card>
 
         {/* SECTION D: AI ANALYSIS NOTICE */}
-        <Card className="border-blue-200 bg-blue-50/40">
+        <Card className="border-sky-200 bg-sky-50/40 rounded-xl">
           <div className="flex items-start gap-3.5">
-            <div className="p-2 bg-blue-100 text-blue-800 rounded-lg shrink-0 mt-0.5">
+            <div className="p-2.5 bg-sky-100 text-sky-700 rounded-xl shrink-0 mt-0.5">
               <Sparkles className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="font-bold text-sm text-blue-950">AI Multimodal Pipeline Overview</h3>
-              <p className="text-xs text-blue-900 mt-1 leading-relaxed">
-                After submission, Chandigarh CivicAI will evaluate your grievance in Phase 6 to compute objective
+              <h3 className="font-bold text-sm text-sky-950">AI Multimodal Pipeline Overview</h3>
+              <p className="text-xs text-sky-900 mt-1 leading-relaxed">
+                After submission, Chandigarh CivicAI will evaluate your grievance to compute objective
                 severity, safety risk, and evidence support factors for municipal triage.
               </p>
               <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                <span className="bg-white/80 border border-blue-200 text-blue-800 px-2 py-0.5 rounded font-medium">
-                  • Severity Estimation (Phase 6)
-                </span>
-                <span className="bg-white/80 border border-blue-200 text-blue-800 px-2 py-0.5 rounded font-medium">
-                  • Public Safety Risk (Phase 6)
-                </span>
-                <span className="bg-white/80 border border-blue-200 text-blue-800 px-2 py-0.5 rounded font-medium">
-                  • Evidence Corroboration (Phase 6)
-                </span>
-                <span className="bg-white/80 border border-blue-200 text-blue-800 px-2 py-0.5 rounded font-medium">
-                  • Deterministic Priority Score (Phase 6)
-                </span>
+                {['Severity Estimation', 'Public Safety Risk', 'Evidence Corroboration', 'Deterministic Priority Score'].map((label) => (
+                  <span key={label} className="bg-white/80 border border-sky-200 text-sky-800 px-2.5 py-0.5 rounded-full font-semibold">
+                    {label}
+                  </span>
+                ))}
               </div>
             </div>
           </div>

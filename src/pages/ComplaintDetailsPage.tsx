@@ -158,25 +158,26 @@ export const ComplaintDetailsPage: React.FC = () => {
   const priorityLevel = complaint.priorityCalculation?.priorityLevel || 'medium';
 
   return (
-    <PageContainer
-      maxWidth="xl"
-      headerTitle={`Complaint Record: ${complaint.trackingNumber}`}
-      headerDescription="Citizen tracking view showing remediation status, photographic evidence, and explainable AI triage."
-      headerAction={
-        <div className="flex items-center gap-2">
-          <Link to={ROUTES.MY_COMPLAINTS}>
-            <Button variant="outline" size="sm" leftIcon={<ArrowLeft className="h-4 w-4" />}>
-              Back to My Complaints
-            </Button>
-          </Link>
-          <Link to={ROUTES.REPORT_ISSUE}>
-            <Button variant="primary" size="sm">
-              New Grievance
-            </Button>
-          </Link>
-        </div>
-      }
-    >
+    <div className="page-enter py-4 sm:py-6">
+      <PageContainer
+        maxWidth="xl"
+        headerTitle={`Complaint Record: ${complaint.trackingNumber}`}
+        headerDescription="Citizen tracking view showing remediation status, photographic evidence, and explainable AI triage."
+        headerAction={
+          <div className="flex items-center gap-2">
+            <Link to={ROUTES.MY_COMPLAINTS}>
+              <Button variant="outline" size="sm" leftIcon={<ArrowLeft className="h-4 w-4" />}>
+                Back to My Complaints
+              </Button>
+            </Link>
+            <Link to={ROUTES.REPORT_ISSUE}>
+              <Button variant="primary" size="sm" className="btn-gradient-sky">
+                New Grievance
+              </Button>
+            </Link>
+          </div>
+        }
+      >
       {/* Live vs Demonstration Data Notice */}
       {isLiveRecord ? (
         <div className="mb-6 p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 flex items-start gap-2.5">
@@ -1143,6 +1144,7 @@ export const ComplaintDetailsPage: React.FC = () => {
         </div>
       </div>
     </PageContainer>
+    </div>
   );
 };
 export default ComplaintDetailsPage;
