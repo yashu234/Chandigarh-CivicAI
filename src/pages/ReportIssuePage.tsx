@@ -25,12 +25,20 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { createComplaint, validateComplaintInput } from '../services/complaintsService';
 import type { ComplaintRow } from '../types/database';
+import {
+  triggerComplaintAnalysis,
+  type StructuredAIAssessment,
+  type AIAnalysisState,
+} from '../services/ai/aiAssessmentService';
 
 interface SubmissionSuccessData {
   complaint: ComplaintRow;
   trackingId: string;
   imageFileName?: string;
   imagePreviewUrl?: string | null;
+  aiAssessment?: StructuredAIAssessment | null;
+  aiState?: AIAnalysisState;
+  aiError?: string | null;
 }
 
 export const ReportIssuePage: React.FC = () => {
@@ -54,6 +62,8 @@ export const ReportIssuePage: React.FC = () => {
 
   // Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionPhaseText, setSubmissionPhaseText] = useState<string | null>(null);
+  const [isRetryingAI, setIsRetryingAI] = useState(false);
   const [successData, setSuccessData] = useState<SubmissionSuccessData | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -134,6 +144,11 @@ export const ReportIssuePage: React.FC = () => {
 
     setFormError(null);
     setIsSubmitting(true);
+    setSubmissionPhaseText(
+      imageFile
+        ? 'Registering grievance & analyzing evidence with Gemini multimodal AI...'
+        : 'Registering grievance in municipal database...'
+    );
 
     try {
       const result = await createComplaint({
@@ -144,11 +159,13 @@ export const ReportIssuePage: React.FC = () => {
         landmark: landmark || undefined,
         streetAddress: address || undefined,
         evidenceFile: imageFile,
+        autoAnalyze: Boolean(imageFile),
       });
 
       if (result.error || !result.data) {
         setFormError(result.error?.message || 'Failed to submit grievance. Please try again.');
         setIsSubmitting(false);
+        setSubmissionPhaseText(null);
         return;
       }
 
@@ -157,11 +174,74 @@ export const ReportIssuePage: React.FC = () => {
         trackingId: result.data.trackingId,
         imageFileName: imageFile?.name,
         imagePreviewUrl: result.data.evidenceSignedUrl || imagePreviewUrl,
+        aiAssessment: result.data.aiAssessment,
+        aiState: result.data.aiState,
+        aiError: result.data.aiError,
       });
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'An unexpected error occurred during submission.');
     } finally {
       setIsSubmitting(false);
+      setSubmissionPhaseText(null);
+    }
+  };
+
+  const handleRetryAnalysis = async () => {
+    if (!successData?.complaint.id || isRetryingAI) return;
+    setIsRetryingAI(true);
+
+    try {
+      const res = await triggerComplaintAnalysis({
+        complaintId: successData.complaint.id,
+        reanalyze: true,
+      });
+
+      setIsRetryingAI(false);
+
+      if (res.state === 'completed' && res.data) {
+        setSuccessData((prev) =>
+          prev
+            ? {
+                ...prev,
+                aiAssessment: res.data,
+                aiState: 'completed',
+                aiError: null,
+              }
+            : null
+        );
+      } else if (res.state === 'not_configured') {
+        setSuccessData((prev) =>
+          prev
+            ? {
+                ...prev,
+                aiAssessment: res.data,
+                aiState: 'not_configured',
+                aiError: res.error?.message || 'Server AI pipeline is unconfigured.',
+              }
+            : null
+        );
+      } else {
+        setSuccessData((prev) =>
+          prev
+            ? {
+                ...prev,
+                aiState: 'failed',
+                aiError: res.error?.message || 'AI evidence analysis failed.',
+              }
+            : null
+        );
+      }
+    } catch (err) {
+      setIsRetryingAI(false);
+      setSuccessData((prev) =>
+        prev
+          ? {
+              ...prev,
+              aiState: 'failed',
+              aiError: err instanceof Error ? err.message : 'AI evidence analysis failed.',
+            }
+          : null
+      );
     }
   };
 
@@ -271,19 +351,162 @@ export const ReportIssuePage: React.FC = () => {
             )}
           </div>
 
-          {/* AI Evidence Analysis Notice (Truthful, non-simulated) */}
-          <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-950 max-w-md mx-auto mb-6 text-left space-y-1.5">
-            <div className="flex items-center gap-1.5 font-bold text-blue-900">
-              <Clock className="h-4 w-4 text-blue-700" />
-              AI Evidence Analysis: Pending Pipeline Processing
+          {/* AI Evidence Analysis Notice & Results (Truthful, non-simulated) */}
+          {successData.aiState === 'completed' && successData.aiAssessment ? (
+            <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 max-w-md mx-auto mb-6 text-left space-y-3 shadow-xs">
+              <div className="flex items-center justify-between pb-2 border-b border-emerald-200/60">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                  <Sparkles className="h-4 w-4 text-emerald-700" />
+                  AI Evidence Analysis Completed
+                </div>
+                <Badge
+                  variant={
+                    complaint.priority_tier === 'critical'
+                      ? 'danger'
+                      : complaint.priority_tier === 'high'
+                      ? 'warning'
+                      : 'primary'
+                  }
+                  size="sm"
+                >
+                  {complaint.priority_tier ? `${complaint.priority_tier.toUpperCase()}` : 'CALCULATED'}
+                  {complaint.priority_score !== null && complaint.priority_score !== undefined
+                    ? ` (${Number(complaint.priority_score).toFixed(1)})`
+                    : ''}
+                </Badge>
+              </div>
+
+              <div className="space-y-1.5 text-[11px] text-emerald-900">
+                <div>
+                  <strong>Detected Issue:</strong> {successData.aiAssessment.detectedIssue}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 pt-1 text-slate-700">
+                  <div>
+                    Severity:{' '}
+                    <span className="font-bold text-red-700">
+                      {successData.aiAssessment.severity !== null
+                        ? `${Number(successData.aiAssessment.severity).toFixed(0)}/100`
+                        : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    Safety Risk:{' '}
+                    <span className="font-bold text-amber-700">
+                      {successData.aiAssessment.safetyRisk !== null
+                        ? `${Number(successData.aiAssessment.safetyRisk).toFixed(0)}/100`
+                        : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    Public Impact:{' '}
+                    <span className="font-bold text-indigo-700">
+                      {successData.aiAssessment.publicImpact !== null
+                        ? `${Number(successData.aiAssessment.publicImpact).toFixed(0)}/100`
+                        : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    Evidence Support:{' '}
+                    <span className="font-bold text-blue-700">
+                      {successData.aiAssessment.evidenceSupport !== null
+                        ? `${Number(successData.aiAssessment.evidenceSupport).toFixed(0)}/100`
+                        : '—'}
+                    </span>
+                  </div>
+                </div>
+
+                {successData.aiAssessment.reasoningSummary && (
+                  <p className="pt-1 text-[11px] text-slate-600 italic border-t border-emerald-100">
+                    "{successData.aiAssessment.reasoningSummary}"
+                  </p>
+                )}
+
+                {successData.aiAssessment.humanReviewRequired && (
+                  <div className="p-2 rounded bg-amber-50 border border-amber-200 text-amber-900 text-[10px] flex items-start gap-1 mt-1 font-medium">
+                    <AlertCircle className="h-3.5 w-3.5 text-amber-700 shrink-0 mt-0.5" />
+                    <span>
+                      Flagged for municipal engineer verification: high safety risk or advisory evidence quality.
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
-            <p className="text-[11px] text-blue-800 leading-relaxed">
-              Your grievance has been recorded with status <strong>submitted</strong> and <strong>Priority: Pending AI Analysis</strong>.
-              Photographic evidence is preserved in private municipal storage. Automated visual corroboration
-              and deterministic priority calculation will be executed once the backend inference pipeline processes the intake.
-              In accordance with municipal transparency principles, no automated priority scores have been invented.
-            </p>
-          </div>
+          ) : successData.aiState === 'failed' ? (
+            <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-xs text-red-950 max-w-md mx-auto mb-6 text-left space-y-2">
+              <div className="flex items-center gap-1.5 font-bold text-red-900">
+                <AlertCircle className="h-4 w-4 text-red-700 shrink-0" />
+                Automated Evidence Analysis Incomplete
+              </div>
+              <p className="text-[11px] text-red-800 leading-relaxed">
+                {successData.aiError || 'Evidence processing encountered an issue.'} Your grievance has been recorded in the municipal registry and safely queued with <strong>human_review_required = true</strong> for manual officer triage.
+              </p>
+              <div className="pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetryAnalysis}
+                  disabled={isRetryingAI}
+                  leftIcon={
+                    isRetryingAI ? (
+                      <Clock className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )
+                  }
+                >
+                  {isRetryingAI ? 'Retrying Analysis...' : 'Retry Evidence Analysis'}
+                </Button>
+              </div>
+            </div>
+          ) : successData.aiState === 'not_configured' ? (
+            <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-950 max-w-md mx-auto mb-6 text-left space-y-2">
+              <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                <Clock className="h-4 w-4 text-amber-700" />
+                AI Evidence Analysis: Server Pipeline Unconfigured
+              </div>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                {successData.aiError ||
+                  'Your grievance has been safely saved in the database. Automated inference requires GEMINI_API_KEY server configuration. Queued for manual officer inspection.'}
+              </p>
+              <div className="pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetryAnalysis}
+                  disabled={isRetryingAI}
+                  leftIcon={
+                    isRetryingAI ? (
+                      <Clock className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )
+                  }
+                >
+                  {isRetryingAI ? 'Retrying Connection...' : 'Retry Pipeline Connection'}
+                </Button>
+              </div>
+            </div>
+          ) : imageFileName ? (
+            <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-950 max-w-md mx-auto mb-6 text-left space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-blue-900">
+                <Clock className="h-4 w-4 text-blue-700" />
+                AI Evidence Analysis: Intake Processing
+              </div>
+              <p className="text-[11px] text-blue-800 leading-relaxed">
+                Your grievance has been recorded with status <strong>submitted</strong>. Photographic evidence is preserved in private municipal storage. Automated visual corroboration and deterministic priority calculation can be executed via tracking details.
+              </p>
+            </div>
+          ) : (
+            <div className="p-4 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 max-w-md mx-auto mb-6 text-left space-y-1">
+              <div className="flex items-center gap-1.5 font-semibold text-slate-800">
+                <ShieldCheck className="h-4 w-4 text-slate-600" />
+                Standard Intake Queue
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                No photographic evidence was attached to this complaint. Grievance registered for standard administrative inspection by municipal field engineers.
+              </p>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Link to={ROUTES.COMPLAINT_DETAILS(complaint.id)}>
@@ -621,7 +844,9 @@ export const ReportIssuePage: React.FC = () => {
             disabled={isSubmitting}
             leftIcon={!isSubmitting ? <FileText className="h-4 w-4" /> : undefined}
           >
-            {isSubmitting ? 'Registering Grievance in Database...' : 'Submit Civic Complaint'}
+            {isSubmitting
+              ? submissionPhaseText || 'Registering Grievance in Database...'
+              : 'Submit Civic Complaint'}
           </Button>
         </div>
       </form>

@@ -21,6 +21,7 @@ import {
   Cpu,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { formatAuthError } from '../utils/authUtils';
 
 export const LoginPage: React.FC = () => {
   const [roleTab, setRoleTab] = useState<'citizen' | 'admin'>('citizen');
@@ -29,6 +30,7 @@ export const LoginPage: React.FC = () => {
   const [otpToken, setOtpToken] = useState('');
   const [citizenAuthMode, setCitizenAuthMode] = useState<'otp' | 'password'>('otp');
   const [otpSent, setOtpSent] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -38,6 +40,15 @@ export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fromLocation = (location.state as { from?: string } | null)?.from;
+
+  // Resend cooldown timer
+  React.useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   const handleTabChange = (role: 'citizen' | 'admin') => {
     setRoleTab(role);
@@ -49,6 +60,7 @@ export const LoginPage: React.FC = () => {
 
   const handleRequestCitizenOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (resendCooldown > 0 && otpSent) return;
     if (!email.trim()) {
       setErrorMessage('Please enter your email address to receive an access code.');
       return;
@@ -59,11 +71,14 @@ export const LoginPage: React.FC = () => {
     const { error } = await loginWithOtp(email.trim());
     setIsLoading(false);
     if (error) {
-      setErrorMessage(error.message || 'Unable to deliver verification code. Please verify email and try again.');
+      setErrorMessage(formatAuthError(error));
       return;
     }
     setOtpSent(true);
-    setSuccessMessage(`A 6-digit verification code and magic link have been dispatched to ${email.trim()}. Please check your inbox.`);
+    setResendCooldown(60);
+    setSuccessMessage(
+      `A verification email has been dispatched to ${email.trim()}. Click the magic link in your email or enter the 6-digit code below.`
+    );
   };
 
   const handleVerifyCitizenOtp = async (e: React.FormEvent) => {
@@ -77,10 +92,12 @@ export const LoginPage: React.FC = () => {
     const { error } = await verifyOtp(email.trim(), otpToken.trim(), 'email');
     setIsLoading(false);
     if (error) {
-      setErrorMessage(error.message || 'Invalid or expired verification code. Please request a new code.');
+      setErrorMessage(formatAuthError(error));
       return;
     }
-    navigate(fromLocation || ROUTES.CITIZEN_DASHBOARD, { replace: true });
+    const citizenDest =
+      fromLocation && !fromLocation.startsWith('/admin') ? fromLocation : ROUTES.CITIZEN_DASHBOARD;
+    navigate(citizenDest, { replace: true });
   };
 
   const handleCitizenPasswordSignIn = async (e: React.FormEvent) => {
@@ -94,10 +111,12 @@ export const LoginPage: React.FC = () => {
     const { error } = await loginWithPassword(email.trim(), password);
     setIsLoading(false);
     if (error) {
-      setErrorMessage(error.message || 'Invalid email or password.');
+      setErrorMessage(formatAuthError(error));
       return;
     }
-    navigate(fromLocation || ROUTES.CITIZEN_DASHBOARD, { replace: true });
+    const citizenDest =
+      fromLocation && !fromLocation.startsWith('/admin') ? fromLocation : ROUTES.CITIZEN_DASHBOARD;
+    navigate(citizenDest, { replace: true });
   };
 
   const handleAdminSignIn = async (e: React.FormEvent) => {
@@ -111,11 +130,13 @@ export const LoginPage: React.FC = () => {
     const { error } = await loginWithPassword(email.trim(), password);
     setIsLoading(false);
     if (error) {
-      setErrorMessage(error.message || 'Official officer authentication failed. Check credentials.');
+      setErrorMessage(formatAuthError(error));
       return;
     }
     await refreshProfile();
-    navigate(fromLocation || ROUTES.ADMIN_DASHBOARD, { replace: true });
+    const adminDest =
+      fromLocation && fromLocation.startsWith('/admin') ? fromLocation : ROUTES.ADMIN_DASHBOARD;
+    navigate(adminDest, { replace: true });
   };
 
   return (

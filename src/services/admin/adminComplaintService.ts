@@ -43,6 +43,10 @@ import {
   getCitizenSafeStatusMessage,
 } from '../notifications/citizenSafeMessages.ts';
 import type { NotificationType } from '../notifications/notificationTypes.ts';
+import {
+  triggerComplaintAnalysis,
+  type AssessmentFetchResult,
+} from '../ai/aiAssessmentService.ts';
 
 export interface AdminMetrics {
   total: number;
@@ -904,3 +908,29 @@ export async function assignDepartment(
     };
   }
 }
+
+/**
+ * Triggers or re-runs photographic evidence analysis for a complaint as an authenticated municipal administrator.
+ * Validates admin session before invoking the backend multimodal pipeline.
+ */
+export async function triggerAdminEvidenceAnalysis(
+  complaintId: string,
+  reanalyze = true
+): Promise<AssessmentFetchResult> {
+  try {
+    await verifyAdminSession();
+
+    return await triggerComplaintAnalysis({
+      complaintId,
+      reanalyze,
+    });
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    return {
+      data: null,
+      state: 'failed',
+      error,
+    };
+  }
+}
+

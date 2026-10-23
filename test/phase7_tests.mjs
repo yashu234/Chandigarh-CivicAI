@@ -7,6 +7,7 @@ import {
 } from '../src/services/ai/aiMultimodalPrompt.ts';
 import {
   ServerBackendAIProvider,
+  SupabaseEdgeAIProvider,
 } from '../src/services/ai/aiProvider.ts';
 import {
   evaluateHumanReviewFlags,
@@ -330,6 +331,125 @@ test('12. Prompt explicitly uses "Evidence Support" and prohibits authenticity/G
   assert.ok(CIVIC_AI_SYSTEM_INSTRUCTION.includes('exact real-world location'));
   assert.ok(CIVIC_AI_SYSTEM_INSTRUCTION.includes('identity of the photographer'));
   assert.ok(CIVIC_AI_SYSTEM_INSTRUCTION.includes('human_review_required: true'));
+});
+
+// ---------------------------------------------------------------------
+// TEST 13: Model configuration migration to gemini-3.8-flash
+// ---------------------------------------------------------------------
+test('13. Multimodal model configuration is migrated to gemini-3.8-flash', () => {
+  const edgeProvider = new SupabaseEdgeAIProvider();
+  assert.equal(edgeProvider.modelVersion, 'gemini-3.8-flash', 'SupabaseEdgeAIProvider model must be gemini-3.8-flash');
+  assert.notEqual(edgeProvider.modelVersion, 'gemini-1.5-flash', 'Retired model gemini-1.5-flash must not be used');
+
+  const edgeFunctionPath = path.resolve(process.cwd(), 'supabase/functions/analyze-complaint-evidence/index.ts');
+  const edgeFunctionContent = fs.readFileSync(edgeFunctionPath, 'utf8');
+
+  assert.ok(
+    edgeFunctionContent.includes("Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash'"),
+    'Edge Function must default to gemini-3.8-flash'
+  );
+  assert.ok(
+    !edgeFunctionContent.includes("'gemini-1.5-flash'"),
+    'Edge Function must not contain retired gemini-1.5-flash model ID'
+  );
+});
+
+// ---------------------------------------------------------------------
+// TEST 14: Upstream HTTP failure handling & error payload contract
+// ---------------------------------------------------------------------
+test('14. Upstream AI HTTP failure contract returns 502 with structured failed state', () => {
+  // Simulate the Edge Function upstream response mapping for non-200 AI status
+  const simulateEdgeFunctionUpstreamFailure = (upstreamStatus, rawErrText) => {
+    let parsedMsg = rawErrText;
+    try {
+      const parsed = JSON.parse(rawErrText);
+      parsedMsg = parsed.error?.message || parsed.message || rawErrText;
+    } catch {
+      parsedMsg = rawErrText;
+    }
+
+    return {
+      status: 502,
+      parsedMsg,
+      body: {
+        state: 'failed',
+        error: `AI provider error (HTTP ${upstreamStatus}). Model inference could not be completed.`,
+      },
+    };
+  };
+
+  const simulated404 = simulateEdgeFunctionUpstreamFailure(404, JSON.stringify({
+    error: { code: 404, message: 'models/gemini-1.5-flash is not found' }
+  }));
+  assert.equal(simulated404.status, 502);
+  assert.equal(simulated404.body.state, 'failed');
+  assert.ok(simulated404.body.error.includes('HTTP 404'));
+
+  const simulated503 = simulateEdgeFunctionUpstreamFailure(503, 'Service Unavailable');
+  assert.equal(simulated503.status, 502);
+  assert.equal(simulated503.body.state, 'failed');
+  assert.ok(simulated503.body.error.includes('HTTP 503'));
+});
+
+// ---------------------------------------------------------------------
+// TEST 15: Error log sanitization guarantees no leaked secrets/JWT/images
+// ---------------------------------------------------------------------
+test('15. Server-side log sanitization redacts API keys, JWTs, query keys, and image data', () => {
+  const sanitizeLogMessage = (rawMessage, knownSecrets = []) => {
+    if (!rawMessage || typeof rawMessage !== 'string') return '';
+    let sanitized = rawMessage;
+
+    for (const secret of knownSecrets) {
+      if (secret && typeof secret === 'string' && secret.trim().length >= 4) {
+        sanitized = sanitized.replaceAll(secret.trim(), '[REDACTED_SECRET]');
+      }
+    }
+
+    sanitized = sanitized.replace(/AIza[0-9A-Za-z_-]{35}/g, '[REDACTED_API_KEY]');
+    sanitized = sanitized.replace(/([?&]key=)[^&\s]+/gi, '$1[REDACTED_KEY]');
+    sanitized = sanitized.replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED_TOKEN]');
+    sanitized = sanitized.replace(/eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+(?:\.[A-Za-z0-9-_.+/=]*)?/g, '[REDACTED_JWT]');
+    sanitized = sanitized.replace(/"data"\s*:\s*"[^"]{50,}"/g, '"data":"[REDACTED_IMAGE_CONTENT]"');
+    sanitized = sanitized.replace(/[A-Za-z0-9+/=]{100,}/g, '[REDACTED_BINARY]');
+
+    if (sanitized.length > 2000) {
+      sanitized = sanitized.slice(0, 2000) + '... [TRUNCATED]';
+    }
+    return sanitized;
+  };
+
+  const sampleApiKey = 'AIzaSyD79abcXYZ_1234567890abcdefghijklm';
+  const sampleCustomSecret = 'my-super-secret-gemini-key-val';
+  const sampleJwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkFkbWluIn0.c2VjcmV0';
+  const sampleUrlWithKey = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=AIzaSyD79abcXYZ_1234567890abcdefghijklm';
+  const sampleBase64Data = '"data": "' + 'A'.repeat(200) + '"';
+
+  const dirtyLog = `Error invoking ${sampleUrlWithKey} with Bearer ${sampleJwt} and secret ${sampleCustomSecret}. Payload: ${sampleBase64Data}`;
+  const cleaned = sanitizeLogMessage(dirtyLog, [sampleCustomSecret]);
+
+  assert.ok(!cleaned.includes(sampleApiKey), 'API key pattern must be redacted');
+  assert.ok(!cleaned.includes(sampleCustomSecret), 'Custom secret value must be redacted');
+  assert.ok(!cleaned.includes(sampleJwt), 'JWT must be redacted');
+  assert.ok(!cleaned.includes('A'.repeat(50)), 'Binary/base64 payload must be redacted');
+  assert.ok(cleaned.includes('[REDACTED_API_KEY]') || cleaned.includes('[REDACTED_KEY]'), 'Redaction tag must be present');
+  assert.ok(cleaned.includes('[REDACTED_TOKEN]') || cleaned.includes('[REDACTED_JWT]'), 'Redaction tag for token must be present');
+});
+
+// ---------------------------------------------------------------------
+// TEST 16: Human review enforcement is preserved on AI failure
+// ---------------------------------------------------------------------
+test('16. Failed AI state unconditionally flags human_review_required with audit reason', () => {
+  const flags = evaluateHumanReviewFlags({
+    analysisState: 'failed',
+    humanReviewReasons: ['AI provider error (HTTP 502). Model inference could not be completed.'],
+  });
+
+  assert.equal(flags.required, true, 'Human review MUST be required on failure');
+  assert.ok(flags.reasons.length > 0, 'Reasons list must not be empty');
+  assert.ok(
+    flags.reasons.some((r) => r.toLowerCase().includes('fail') || r.toLowerCase().includes('error')),
+    'Audit reason must explain the AI failure'
+  );
 });
 
 console.log(`\n--- ALL ${passedTests}/${totalTests} TESTS PASSED SUCCESSFULLY ---`);

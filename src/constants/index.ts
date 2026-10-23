@@ -15,6 +15,7 @@ export const ROUTES = {
   REPORT_ISSUE: '/report-issue',
   MY_COMPLAINTS: '/my-complaints',
   COMPLAINT_DETAILS: (id = ':id') => `/complaints/${id}`,
+  AUTH_CALLBACK: '/auth/callback',
   ADMIN_DASHBOARD: '/admin/dashboard',
   ADMIN_COMPLAINT_DETAILS: (id = ':id') => `/admin/complaints/${id}`,
 } as const;

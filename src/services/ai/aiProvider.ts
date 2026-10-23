@@ -74,10 +74,30 @@ export class ServerBackendAIProvider implements AIAnalysisProvider {
  */
 export class SupabaseEdgeAIProvider implements AIAnalysisProvider {
   public readonly providerName = 'Google Gemini Multimodal (Supabase Edge Function)';
-  public readonly modelVersion = 'gemini-1.5-flash';
+  public readonly modelVersion = 'gemini-3.8-flash';
   public readonly isConfigured = true;
 
+  // In-flight concurrency deduplication map to prevent redundant concurrent calls
+  private inFlightRequests = new Map<string, Promise<StructuredAIAssessment>>();
+
   public async analyzeComplaintEvidence(
+    input: AIAnalysisInput
+  ): Promise<StructuredAIAssessment> {
+    const dedupeKey = `${input.complaintId}:${Boolean(input.reanalyze)}`;
+    if (this.inFlightRequests.has(dedupeKey)) {
+      return this.inFlightRequests.get(dedupeKey)!;
+    }
+
+    const analysisPromise = this.executeAnalysis(input);
+    this.inFlightRequests.set(dedupeKey, analysisPromise);
+    analysisPromise.finally(() => {
+      this.inFlightRequests.delete(dedupeKey);
+    });
+
+    return analysisPromise;
+  }
+
+  private async executeAnalysis(
     input: AIAnalysisInput
   ): Promise<StructuredAIAssessment> {
     if (!isSupabaseConfigured()) {
@@ -113,13 +133,34 @@ export class SupabaseEdgeAIProvider implements AIAnalysisProvider {
       );
 
       if (error) {
+        let extractedErrorMsg = error.message || String(error);
+
+        // Extract structured JSON error response if provided by Edge Function context
+        if (
+          error &&
+          typeof error === 'object' &&
+          'context' in error &&
+          error.context &&
+          typeof (error.context as Response).clone === 'function'
+        ) {
+          try {
+            const errContext = (error.context as Response).clone();
+            const errJson = await errContext.json();
+            if (errJson?.error) {
+              extractedErrorMsg = errJson.error;
+            } else if (errJson?.message) {
+              extractedErrorMsg = errJson.message;
+            }
+          } catch {
+            // Keep default message if JSON parsing fails
+          }
+        }
+
         // Detect if function has not been deployed to the remote project yet
-        const errMsg = error.message || String(error);
         const isNotDeployed =
-          errMsg.includes('404') ||
-          errMsg.includes('not found') ||
-          errMsg.includes('FunctionsFetchError') ||
-          errMsg.includes('Failed to send a request');
+          extractedErrorMsg.includes('FunctionsFetchError') ||
+          extractedErrorMsg.includes('Failed to send a request') ||
+          (extractedErrorMsg.includes('404') && extractedErrorMsg.toLowerCase().includes('not found'));
 
         if (isNotDeployed) {
           return this.createUnconfiguredResponse(
@@ -130,7 +171,7 @@ export class SupabaseEdgeAIProvider implements AIAnalysisProvider {
 
         return this.createFailedResponse(
           input.complaintId,
-          errMsg || 'Server-side Edge function invocation failed.'
+          extractedErrorMsg || 'Server-side Edge function invocation failed.'
         );
       }
 

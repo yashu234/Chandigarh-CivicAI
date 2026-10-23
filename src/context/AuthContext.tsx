@@ -2,6 +2,7 @@ import React, { createContext, useEffect, useState, useCallback, useMemo } from 
 import type { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../services/supabase/client';
 import type { Database, ProfileRow, UserRole } from '../types/database';
+import { getAuthRedirectUrl } from '../utils/authUtils';
 
 export interface CitizenRegistrationData {
   fullName: string;
@@ -29,7 +30,11 @@ export interface AuthContextValue {
   loginWithPassword: (email: string, password: string) => Promise<{ error: AuthError | Error | null }>;
   registerCitizen: (
     data: CitizenRegistrationData
-  ) => Promise<{ error: AuthError | Error | null; needsEmailVerification: boolean }>;
+  ) => Promise<{ error: AuthError | Error | null; needsEmailVerification: boolean; alreadyRegistered?: boolean }>;
+  resendVerification: (
+    email: string,
+    type?: 'signup' | 'email_change'
+  ) => Promise<{ error: AuthError | Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -187,7 +192,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { error } = await supabase.auth.signInWithOtp({
           email,
           options: {
-            emailRedirectTo: `${window.location.origin}/dashboard`,
+            emailRedirectTo: getAuthRedirectUrl(),
           },
         });
         return { error };
@@ -286,7 +291,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const registerCitizen = useCallback(
     async (
       data: CitizenRegistrationData
-    ): Promise<{ error: AuthError | Error | null; needsEmailVerification: boolean }> => {
+    ): Promise<{ error: AuthError | Error | null; needsEmailVerification: boolean; alreadyRegistered?: boolean }> => {
       if (!isSupabaseConfigured()) {
         return { error: new Error('Supabase is not configured.'), needsEmailVerification: false };
       }
@@ -305,12 +310,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 mobile_number: mobileNumber,
                 sector: sector,
               },
-              emailRedirectTo: `${window.location.origin}/dashboard`,
+              emailRedirectTo: getAuthRedirectUrl(),
             },
           });
 
           if (error) {
             return { error, needsEmailVerification: false };
+          }
+
+          // Supabase User Enumeration Defense: if user already exists, GoTrue returns a user with empty identities []
+          if (
+            signUpData.user &&
+            Array.isArray(signUpData.user.identities) &&
+            signUpData.user.identities.length === 0
+          ) {
+            return {
+              error: new Error('An account with this email address already exists. Please sign in instead.'),
+              needsEmailVerification: false,
+              alreadyRegistered: true,
+            };
           }
 
           // If session returned immediately (email confirmation disabled in Supabase)
@@ -346,7 +364,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               mobile_number: mobileNumber,
               sector: sector,
             },
-            emailRedirectTo: `${window.location.origin}/dashboard`,
+            emailRedirectTo: getAuthRedirectUrl(),
           },
         });
 
@@ -360,6 +378,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     },
     [fetchOrCreateProfile]
+  );
+
+  /**
+   * Resend verification email for signup confirmation
+   */
+  const resendVerification = useCallback(
+    async (
+      email: string,
+      type: 'signup' | 'email_change' = 'signup'
+    ): Promise<{ error: AuthError | Error | null }> => {
+      if (!isSupabaseConfigured()) {
+        return { error: new Error('Supabase is not configured.') };
+      }
+      try {
+        const { error } = await supabase.auth.resend({
+          type,
+          email,
+          options: {
+            emailRedirectTo: getAuthRedirectUrl(),
+          },
+        });
+        return { error };
+      } catch (err) {
+        return { error: err as Error };
+      }
+    },
+    []
   );
 
   /**
@@ -403,6 +448,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       verifyOtp,
       loginWithPassword,
       registerCitizen,
+      resendVerification,
       signOut,
       refreshProfile,
     }),
@@ -419,6 +465,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       verifyOtp,
       loginWithPassword,
       registerCitizen,
+      resendVerification,
       signOut,
       refreshProfile,
     ]

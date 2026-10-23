@@ -37,10 +37,10 @@ import type { AIAssessmentRow } from '../../types/database';
 
 export interface AIAnalysisInput {
   complaintId: string;
-  title: string;
-  description: string;
-  category: string;
-  sector: string;
+  title?: string;
+  description?: string;
+  category?: string;
+  sector?: string;
   imageSignedUrl?: string | null;
   imageMimeType?: string | null;
   reanalyze?: boolean;

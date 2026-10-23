@@ -15,6 +15,7 @@ import { MyComplaintsPage } from '../pages/MyComplaintsPage';
 import { ComplaintDetailsPage } from '../pages/ComplaintDetailsPage';
 import { AdminDashboardPage } from '../pages/AdminDashboardPage';
 import { AdminComplaintDetailsPage } from '../pages/AdminComplaintDetailsPage';
+import { AuthCallbackPage } from '../pages/AuthCallbackPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 
 export const AppRoutes: React.FC = () => {
@@ -24,6 +25,9 @@ export const AppRoutes: React.FC = () => {
         <Route element={<RootLayout />}>
           {/* Public Landing Page */}
           <Route path={ROUTES.HOME} element={<LandingPage />} />
+
+          {/* Authentication Callback Route (for email verification & magic links) */}
+          <Route path={ROUTES.AUTH_CALLBACK} element={<AuthCallbackPage />} />
 
           {/* Public Auth Routes (Redirects if already signed in) */}
           <Route element={<PublicOnlyRoute />}>

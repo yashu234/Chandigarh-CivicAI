@@ -1,16 +1,17 @@
-import { supabase, isSupabaseConfigured } from '../supabase/client';
+import { supabase, isSupabaseConfigured } from '../supabase/client.ts';
 import type {
   StructuredAIAssessment,
   AIAnalysisState,
   AIAnalysisInput,
-} from './aiAssessmentTypes';
+} from './aiAssessmentTypes.ts';
 import {
   validateAssessmentScores,
   mapDbAssessmentToDomain,
-} from './aiAssessmentTypes';
-import { defaultAIProvider } from './aiProvider';
+} from './aiAssessmentTypes.ts';
+import { defaultAIProvider } from './aiProvider.ts';
 
 export { mapDbAssessmentToDomain };
+export type { StructuredAIAssessment, AIAnalysisState, AIAnalysisInput };
 
 export interface AssessmentFetchResult {
   data: StructuredAIAssessment | null;
@@ -45,8 +46,8 @@ export async function getAssessmentForComplaint(
       return { data: domainModel, state: 'completed', error: null };
     }
 
-    // No completed row exists yet in public.ai_assessments
-    return { data: null, state: 'not_configured', error: null };
+    // Supabase is configured, but no completed assessment row exists yet for this grievance
+    return { data: null, state: 'pending', error: null };
   } catch (err) {
     return {
       data: null,

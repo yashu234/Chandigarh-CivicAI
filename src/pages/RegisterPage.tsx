@@ -20,6 +20,7 @@ import {
   Cpu,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { formatAuthError } from '../utils/authUtils';
 
 export const RegisterPage: React.FC = () => {
   const [fullName, setFullName] = useState('');
@@ -29,13 +30,24 @@ export const RegisterPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [step, setStep] = useState<'form' | 'verify'>('form');
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isExistingUser, setIsExistingUser] = useState(false);
 
-  const { registerCitizen, verifyOtp } = useAuth();
+  const { registerCitizen, verifyOtp, resendVerification } = useAuth();
   const navigate = useNavigate();
+
+  // Handle countdown for resend cooldown
+  React.useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,6 +58,7 @@ export const RegisterPage: React.FC = () => {
     setIsLoading(true);
     setErrorMessage(null);
     setSuccessMessage(null);
+    setIsExistingUser(false);
 
     const result = await registerCitizen({
       fullName: fullName.trim(),
@@ -57,17 +70,46 @@ export const RegisterPage: React.FC = () => {
 
     setIsLoading(false);
 
+    if (result.alreadyRegistered) {
+      setIsExistingUser(true);
+      setErrorMessage(
+        'An account with this email address already exists. Please sign in instead.'
+      );
+      return;
+    }
+
     if (result.error) {
-      setErrorMessage(result.error.message || 'Registration failed. Please check details and try again.');
+      setErrorMessage(formatAuthError(result.error));
       return;
     }
 
     if (result.needsEmailVerification) {
       setStep('verify');
-      setSuccessMessage(`A verification code or confirmation link has been sent to ${email.trim()}.`);
+      setResendCooldown(60);
+      setSuccessMessage(
+        `A verification email has been dispatched to ${email.trim()}. Click the link in the email or enter the 6-digit code below.`
+      );
     } else {
       navigate(ROUTES.CITIZEN_DASHBOARD, { replace: true });
     }
+  };
+
+  const handleResendCode = async () => {
+    if (resendCooldown > 0) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const { error } = await resendVerification(email.trim(), 'signup');
+    setIsLoading(false);
+
+    if (error) {
+      setErrorMessage(formatAuthError(error));
+      return;
+    }
+
+    setResendCooldown(60);
+    setSuccessMessage(`A fresh verification email has been dispatched to ${email.trim()}.`);
   };
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
@@ -81,7 +123,7 @@ export const RegisterPage: React.FC = () => {
     setIsLoading(false);
 
     if (result.error) {
-      setErrorMessage(result.error.message || 'Invalid or expired verification code. Please try again.');
+      setErrorMessage(formatAuthError(result.error));
       return;
     }
 
@@ -130,9 +172,18 @@ export const RegisterPage: React.FC = () => {
           {errorMessage && (
             <div className="mb-5 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 flex items-start gap-2.5 animate-fade-in">
               <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-rose-600" />
-              <div>
+              <div className="flex-1">
                 <strong className="block font-bold">Registration Notice</strong>
                 <span>{errorMessage}</span>
+                {isExistingUser && (
+                  <div className="mt-2.5">
+                    <Link to={ROUTES.LOGIN}>
+                      <Button variant="sky" size="sm">
+                        Go to Sign In
+                      </Button>
+                    </Link>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -224,25 +275,26 @@ export const RegisterPage: React.FC = () => {
           ) : (
             <form onSubmit={handleVerifyOtp} className="space-y-4 animate-fade-in">
               <div className="p-3.5 bg-sky-50 rounded-xl border border-sky-200 text-xs text-sky-900 space-y-1.5">
-                <p>We sent a 6-digit confirmation code to <strong>{email}</strong>.</p>
-                <p className="text-sky-800">Enter the code below to complete your resident registration. You can also click the confirmation link in your email directly.</p>
+                <p>A verification email was dispatched to <strong>{email}</strong>.</p>
+                <p className="text-sky-800">
+                  <strong>Click the confirmation link in the email</strong> to verify your resident account instantly, or enter the 6-digit code below if one was provided in the message.
+                </p>
               </div>
 
               <Input
-                label="6-Digit Verification Code"
+                label="6-Digit Verification Code (Optional if clicking email link)"
                 type="text"
                 placeholder="123456"
                 maxLength={8}
                 value={otpCode}
                 onChange={(e) => setOtpCode(e.target.value)}
-                required
-                helperText="Check your email inbox or spam folder"
+                helperText="If your email contains a 6-digit code, enter it here. Otherwise, click the link directly."
                 leftIcon={<KeyRound className="h-4 w-4" />}
                 autoFocus
               />
 
-              <Button type="submit" variant="sky" className="w-full" isLoading={isLoading}>
-                Verify &amp; Complete Registration
+              <Button type="submit" variant="sky" className="w-full" isLoading={isLoading} disabled={!otpCode.trim()}>
+                Verify with 6-Digit Code
               </Button>
 
               <div className="flex items-center justify-between pt-1 text-xs">
@@ -255,13 +307,24 @@ export const RegisterPage: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={handleRegisterSubmit}
-                  disabled={isLoading}
-                  className="text-sky-600 hover:underline inline-flex items-center gap-1 font-bold"
+                  onClick={handleResendCode}
+                  disabled={isLoading || resendCooldown > 0}
+                  className={`inline-flex items-center gap-1 font-bold ${
+                    resendCooldown > 0
+                      ? 'text-slate-400 cursor-not-allowed'
+                      : 'text-sky-600 hover:underline'
+                  }`}
                 >
-                  <RefreshCw className="h-3 w-3" />
-                  Resend Code
+                  <RefreshCw className={`h-3 w-3 ${isLoading ? 'animate-spin' : ''}`} />
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend Email'}
                 </button>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 text-center text-xs text-slate-500">
+                Already verified via email?{' '}
+                <Link to={ROUTES.LOGIN} className="text-sky-700 font-bold hover:underline">
+                  Sign In to Dashboard
+                </Link>
               </div>
             </form>
           )}

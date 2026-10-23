@@ -25,6 +25,11 @@ import {
   getCitizenSafeStatusMessage,
 } from './notifications/citizenSafeMessages.ts';
 import { createNotification } from './notifications/notificationService.ts';
+import {
+  triggerComplaintAnalysis,
+  type StructuredAIAssessment,
+  type AIAnalysisState,
+} from './ai/aiAssessmentService.ts';
 
 export interface CreateComplaintInput {
   title: string;
@@ -36,6 +41,7 @@ export interface CreateComplaintInput {
   latitude?: number | null;
   longitude?: number | null;
   evidenceFile?: File | null;
+  autoAnalyze?: boolean;
 }
 
 export interface CreateComplaintResult {
@@ -43,6 +49,9 @@ export interface CreateComplaintResult {
   evidence: ComplaintEvidenceRow | null;
   trackingId: string;
   evidenceSignedUrl?: string | null;
+  aiAssessment?: StructuredAIAssessment | null;
+  aiState?: AIAnalysisState;
+  aiError?: string | null;
 }
 
 /**
@@ -235,12 +244,50 @@ export async function createComplaint(
       evidenceSignedUrl = signedUrl;
     }
 
+    // 6. Automatic AI Evidence Analysis Trigger (Phase 1)
+    let aiAssessment: StructuredAIAssessment | null = null;
+    let aiState: AIAnalysisState | undefined = undefined;
+    let aiError: string | null = null;
+
+    if (evidenceRecord && input.autoAnalyze !== false) {
+      try {
+        const analysisRes = await triggerComplaintAnalysis({
+          complaintId: createdComplaint.id,
+          reanalyze: false,
+        });
+
+        aiAssessment = analysisRes.data;
+        aiState = analysisRes.state;
+        if (analysisRes.error) {
+          aiError = analysisRes.error.message;
+        }
+
+        // Refresh complaint with updated priority_score and priority_tier from database
+        const { data: updatedComp } = await supabase
+          .from('complaints')
+          .select('*')
+          .eq('id', createdComplaint.id)
+          .maybeSingle();
+
+        if (updatedComp) {
+          createdComplaint = updatedComp;
+        }
+      } catch (autoErr) {
+        aiState = 'failed';
+        aiError = autoErr instanceof Error ? autoErr.message : 'AI analysis trigger encountered an error.';
+        console.warn('[complaintsService] Auto-analysis warning (non-fatal):', autoErr);
+      }
+    }
+
     return {
       data: {
         complaint: createdComplaint,
         evidence: evidenceRecord,
         trackingId: createdComplaint.tracking_id,
         evidenceSignedUrl,
+        aiAssessment,
+        aiState,
+        aiError,
       },
       error: null,
     };

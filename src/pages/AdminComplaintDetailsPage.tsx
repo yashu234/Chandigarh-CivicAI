@@ -27,6 +27,9 @@ import {
   Copy,
   ExternalLink,
   Info,
+  Loader2,
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 import type { Complaint, ComplaintStatus } from '../types';
 import type { PriorityTier } from '../services/priority/priorityTypes';
@@ -35,6 +38,7 @@ import {
   transitionComplaintStatus,
   overridePriority,
   assignDepartment,
+  triggerAdminEvidenceAnalysis,
   type AdminComplaintDetailResult,
 } from '../services/admin/adminComplaintService';
 import { getAllowedTransitions } from '../services/admin/statusWorkflow';
@@ -90,6 +94,10 @@ export const AdminComplaintDetailsPage: React.FC = () => {
   const [demoDuplicates, setDemoDuplicates] = useState<DuplicateCandidateSummary[]>([]);
   const [demoRecurrence, setDemoRecurrence] = useState<RecurrenceSignal | null>(null);
 
+  // AI Evidence Analysis State
+  const [isAnalyzingEvidence, setIsAnalyzingEvidence] = useState<boolean>(false);
+  const [aiActionError, setAiActionError] = useState<string | null>(null);
+
   const showFeedback = (message: string) => {
     setActionFeedback(message);
     setActionError(null);
@@ -101,6 +109,35 @@ export const AdminComplaintDetailsPage: React.FC = () => {
   const showError = (message: string) => {
     setActionError(message);
     setActionFeedback(null);
+  };
+
+  const handleAdminAnalyze = async (reanalyze = true) => {
+    if (!id || isAnalyzingEvidence) return;
+    setIsAnalyzingEvidence(true);
+    setAiActionError(null);
+
+    try {
+      const result = await triggerAdminEvidenceAnalysis(id, reanalyze);
+      setIsAnalyzingEvidence(false);
+
+      if (result.state === 'completed') {
+        showFeedback('AI evidence analysis completed successfully. Deterministic priority updated.');
+        await loadDetails();
+      } else if (result.state === 'not_configured') {
+        const msg = result.error?.message || 'Server AI pipeline is not configured.';
+        setAiActionError(msg);
+        showError(msg);
+      } else {
+        const msg = result.error?.message || 'AI evidence analysis failed.';
+        setAiActionError(msg);
+        showError(msg);
+      }
+    } catch (err) {
+      setIsAnalyzingEvidence(false);
+      const msg = err instanceof Error ? err.message : 'An error occurred during evidence analysis.';
+      setAiActionError(msg);
+      showError(msg);
+    }
   };
 
   // Helper to compute demo duplicates and recurrence
@@ -613,43 +650,82 @@ export const AdminComplaintDetailsPage: React.FC = () => {
                   <h4 className="font-bold text-slate-900 text-xs">AI Evidence Assessment</h4>
                   <p className="text-[11px] text-slate-500">Multimodal physical defect analysis</p>
                 </div>
-                {detailData?.assessment?.human_review_required ? (
-                  <Badge variant="warning" size="sm">
-                    Human Review Flagged
-                  </Badge>
-                ) : (
-                  <Badge variant="success" size="sm">
-                    Intake Passed
-                  </Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {detailData?.assessment?.human_review_required ? (
+                    <Badge variant="warning" size="sm">
+                      Human Review Flagged
+                    </Badge>
+                  ) : detailData?.assessment ? (
+                    <Badge variant="success" size="sm">
+                      Intake Passed
+                    </Badge>
+                  ) : null}
+
+                  {/* Admin Re-analyze / Analyze Action Button */}
+                  {(detailData?.evidence || demoComplaint?.imageUrl) && (
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={() => handleAdminAnalyze(Boolean(detailData?.assessment))}
+                      disabled={isAnalyzingEvidence}
+                      leftIcon={
+                        isAnalyzingEvidence ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3 w-3" />
+                        )
+                      }
+                    >
+                      {isAnalyzingEvidence
+                        ? 'Analyzing...'
+                        : detailData?.assessment
+                        ? 'Re-analyze'
+                        : 'Run AI Analysis'}
+                    </Button>
+                  )}
+                </div>
               </div>
+
+              {aiActionError && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-900 space-y-1.5">
+                  <div className="flex items-center gap-1.5 font-bold text-red-800">
+                    <AlertCircle className="h-4 w-4 text-red-600 shrink-0" />
+                    AI Analysis Error
+                  </div>
+                  <p className="text-[11px] text-red-700 leading-relaxed">{aiActionError}</p>
+                  <div className="pt-1">
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={() => handleAdminAnalyze(true)}
+                      disabled={isAnalyzingEvidence}
+                      leftIcon={<RefreshCw className="h-3 w-3" />}
+                    >
+                      Retry Analysis
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {detailData?.assessment ? (
                 <div className="space-y-3 text-xs">
-                  <div className="p-2 bg-slate-50 rounded border border-slate-100">
-                    <span className="text-[11px] text-slate-500 block">Detected Issue:</span>
-                    <span className="font-bold text-slate-900">{detailData.assessment.detected_issue}</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="p-2 bg-slate-50 rounded border border-slate-100">
+                      <span className="text-[11px] text-slate-500 block">Detected Issue:</span>
+                      <span className="font-bold text-slate-900">{detailData.assessment.detected_issue}</span>
+                    </div>
+                    {detailData.assessment.suggested_category && (
+                      <div className="p-2 bg-slate-50 rounded border border-slate-100">
+                        <span className="text-[11px] text-slate-500 block">Suggested Category:</span>
+                        <span className="font-bold text-slate-900">{detailData.assessment.suggested_category}</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">
                     <div>
                       <div className="flex justify-between text-[11px] mb-0.5">
-                        <span className="text-slate-600">Evidence Support</span>
-                        <span className="font-bold text-blue-700">
-                          {Number(detailData.assessment.evidence_support).toFixed(0)} / 100
-                        </span>
-                      </div>
-                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                        <div
-                          className="bg-blue-600 h-1.5 rounded-full"
-                          style={{ width: `${detailData.assessment.evidence_support}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-[11px] mb-0.5">
-                        <span className="text-slate-600">Severity</span>
+                        <span className="text-slate-600">Severity (35% weight)</span>
                         <span className="font-bold text-red-700">
                           {Number(detailData.assessment.severity).toFixed(0)} / 100
                         </span>
@@ -657,14 +733,14 @@ export const AdminComplaintDetailsPage: React.FC = () => {
                       <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
                         <div
                           className="bg-red-600 h-1.5 rounded-full"
-                          style={{ width: `${detailData.assessment.severity}%` }}
+                          style={{ width: `${Math.min(100, Math.max(0, detailData.assessment.severity ?? 0))}%` }}
                         />
                       </div>
                     </div>
 
                     <div>
                       <div className="flex justify-between text-[11px] mb-0.5">
-                        <span className="text-slate-600">Safety Risk</span>
+                        <span className="text-slate-600">Safety Risk (30% weight)</span>
                         <span className="font-bold text-amber-700">
                           {Number(detailData.assessment.safety_risk).toFixed(0)} / 100
                         </span>
@@ -672,8 +748,53 @@ export const AdminComplaintDetailsPage: React.FC = () => {
                       <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
                         <div
                           className="bg-amber-600 h-1.5 rounded-full"
-                          style={{ width: `${detailData.assessment.safety_risk}%` }}
+                          style={{ width: `${Math.min(100, Math.max(0, detailData.assessment.safety_risk ?? 0))}%` }}
                         />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-[11px] mb-0.5">
+                        <span className="text-slate-600">Public Impact (20% weight)</span>
+                        <span className="font-bold text-indigo-700">
+                          {Number(detailData.assessment.public_impact ?? 0).toFixed(0)} / 100
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className="bg-indigo-600 h-1.5 rounded-full"
+                          style={{ width: `${Math.min(100, Math.max(0, detailData.assessment.public_impact ?? 0))}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-[11px] mb-0.5">
+                        <span className="text-slate-600">Evidence Support (5% weight)</span>
+                        <span className="font-bold text-blue-700">
+                          {Number(detailData.assessment.evidence_support).toFixed(0)} / 100
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                        <div
+                          className="bg-blue-600 h-1.5 rounded-full"
+                          style={{ width: `${Math.min(100, Math.max(0, detailData.assessment.evidence_support ?? 0))}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-[11px]">
+                      <div>
+                        <span className="text-slate-500">Image Quality: </span>
+                        <span className="font-semibold text-slate-800">
+                          {detailData.assessment.image_quality !== null ? `${Number(detailData.assessment.image_quality).toFixed(0)}/100` : 'N/A'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Description Match: </span>
+                        <span className="font-semibold text-slate-800">
+                          {detailData.assessment.description_match !== null ? `${Number(detailData.assessment.description_match).toFixed(0)}/100` : 'N/A'}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -683,10 +804,52 @@ export const AdminComplaintDetailsPage: React.FC = () => {
                       <strong>Reasoning:</strong> {detailData.assessment.reasoning_summary}
                     </p>
                   )}
+
+                  {detailData.assessment.human_review_required && (
+                    <div className="p-2.5 rounded bg-amber-50 border border-amber-200 text-amber-900 text-[11px] space-y-1">
+                      <div className="font-bold flex items-center gap-1 text-amber-950">
+                        <AlertTriangle className="h-3.5 w-3.5 text-amber-700" />
+                        Human Review Required
+                      </div>
+                      <p className="text-amber-800">
+                        Flagged for engineering inspection. Automated assessments provide advisory support and never replace human officer decisions.
+                      </p>
+                    </div>
+                  )}
+
+                  {detailData.assessment.model_version && (
+                    <div className="text-[10px] text-slate-400 font-mono pt-1 flex justify-between">
+                      <span>Model: {detailData.assessment.model_version}</span>
+                      <span>Verified deterministic scoring</span>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div className="p-4 text-center text-slate-500 text-xs">
-                  AI assessment has not completed for this grievance.
+                <div className="p-4 text-center space-y-2">
+                  <p className="text-slate-500 text-xs">
+                    AI evidence assessment has not completed for this grievance.
+                  </p>
+                  {(detailData?.evidence || demoComplaint?.imageUrl) ? (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleAdminAnalyze(false)}
+                      disabled={isAnalyzingEvidence}
+                      leftIcon={
+                        isAnalyzingEvidence ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3.5 w-3.5" />
+                        )
+                      }
+                    >
+                      {isAnalyzingEvidence ? 'Running Multimodal Analysis...' : 'Run AI Evidence Analysis'}
+                    </Button>
+                  ) : (
+                    <p className="text-[11px] text-slate-400">
+                      No photographic evidence is attached to this complaint.
+                    </p>
+                  )}
                 </div>
               )}
             </Card>

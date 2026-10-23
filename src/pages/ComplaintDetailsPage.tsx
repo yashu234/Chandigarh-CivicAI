@@ -73,6 +73,12 @@ export const ComplaintDetailsPage: React.FC = () => {
     if (result.state === 'completed' && result.data) {
       setAssessment(result.data);
       setAssessmentState('completed');
+      if (complaint?.id) {
+        const { data: refreshed } = await getComplaintByIdOrTracking(complaint.id);
+        if (refreshed) {
+          setComplaint(refreshed);
+        }
+      }
     } else if (result.state === 'not_configured') {
       setAssessment(result.data);
       setAssessmentState('not_configured');
