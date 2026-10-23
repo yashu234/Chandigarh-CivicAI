@@ -40,6 +40,9 @@ import {
   requestDeviceCoordinates,
   formatCoordinates,
   suggestNearestSector,
+  getSectorCoordinates,
+  projectCoordinatesToPercent,
+  projectPercentToCoordinates,
   type GeoCoordinates,
 } from '../services/locationService';
 
@@ -206,6 +209,44 @@ export const ReportIssuePage: React.FC = () => {
     setLocationSuccessMsg(null);
     setLocationError(null);
     setSuggestedSector(null);
+  };
+
+  const handleMapClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+    const xPercent = (clickX / rect.width) * 100;
+    const yPercent = (clickY / rect.height) * 100;
+
+    const newCoords = projectPercentToCoordinates(xPercent, yPercent);
+    setCoordinates(newCoords);
+    setLocationError(null);
+
+    const nearest = suggestNearestSector(newCoords.latitude, newCoords.longitude);
+    if (nearest) {
+      setSector(nearest);
+      setSuggestedSector(nearest);
+      setLocationSuccessMsg(
+        `Map pin placed: ${formatCoordinates(newCoords.latitude, newCoords.longitude)} (${nearest})`
+      );
+    } else {
+      setLocationSuccessMsg(
+        `Map pin placed: ${formatCoordinates(newCoords.latitude, newCoords.longitude)}`
+      );
+    }
+  };
+
+  const handleCenterOnSector = (sectorName: string) => {
+    const coords = getSectorCoordinates(sectorName);
+    if (coords) {
+      setCoordinates(coords);
+      setLocationError(null);
+      setSuggestedSector(sectorName);
+      setLocationSuccessMsg(
+        `Map pin centered on ${sectorName}: ${formatCoordinates(coords.latitude, coords.longitude)}`
+      );
+    }
   };
 
   // Submit Handler connected to real Supabase service
@@ -1062,79 +1103,192 @@ export const ReportIssuePage: React.FC = () => {
               />
             </div>
 
+            {/* Interactive Sector & Coordinate Locator */}
             <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase tracking-widest mb-1.5">
-                Sector Map Reference
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-widest">
+                  Chandigarh Sector Coordinate Map
+                </label>
+                {coordinates && (
+                  <span className="text-[11px] font-mono text-emerald-700 font-semibold flex items-center gap-1">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Pin Active: {formatCoordinates(coordinates.latitude, coordinates.longitude)}
+                  </span>
+                )}
+              </div>
+
+              {/* Map Provider Notice */}
+              <div className="p-3 mb-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600 flex items-start gap-2">
+                <MapPin className="h-4 w-4 text-sky-600 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <strong>Map Integration Notice:</strong> Full Google Maps API provider integration is a separate step (requires API key setup). This interactive Chandigarh sector coordinate system provides in-situ GPS capture, coordinate projection, and interactive pin placement.
+                </div>
+              </div>
+
               <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs">
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 text-white">
+                <div className="flex flex-wrap items-center justify-between px-4 py-2.5 bg-slate-900 text-white gap-2">
                   <span className="flex items-center gap-2 text-xs font-bold">
                     <MapPin className="h-3.5 w-3.5 text-sky-400" />
                     Target: {sector}, Union Territory of Chandigarh
                   </span>
                   <span className="text-[10px] text-sky-400 font-semibold tracking-wide uppercase font-mono">
                     {coordinates
-                      ? `GPS: ${formatCoordinates(coordinates.latitude, coordinates.longitude)}`
-                      : '30.7333° N, 76.7794° E'}
+                      ? `Pinned: ${formatCoordinates(coordinates.latitude, coordinates.longitude)}`
+                      : 'No GPS Pin Placed'}
                   </span>
                 </div>
 
-                {/* Sector grid visual */}
-                <div className="relative bg-gradient-to-br from-sky-50 to-slate-100 p-5 h-40 flex items-center justify-center overflow-hidden">
+                {/* Interactive Sector grid visual with click-to-pin */}
+                <div
+                  onClick={handleMapClick}
+                  className="relative bg-gradient-to-br from-sky-50 via-slate-50 to-slate-100 p-5 h-56 flex items-center justify-center overflow-hidden cursor-crosshair select-none"
+                  title="Click anywhere on the grid to drop or move the location pin"
+                  role="region"
+                  aria-label="Interactive Chandigarh Sector Map"
+                >
                   {/* Background grid lines */}
                   <div
-                    className="absolute inset-0"
+                    className="absolute inset-0 pointer-events-none"
                     style={{
                       backgroundImage:
-                        'linear-gradient(rgba(14,165,233,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(14,165,233,0.08) 1px, transparent 1px)',
-                      backgroundSize: '24px 24px',
+                        'linear-gradient(rgba(14,165,233,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(14,165,233,0.10) 1px, transparent 1px)',
+                      backgroundSize: '28px 28px',
                     }}
                   />
 
-                  {/* Center pin */}
-                  <div className="relative z-10 flex flex-col items-center gap-2">
-                    <div
-                      className={`h-12 w-12 rounded-full border-2 flex items-center justify-center animate-pulse ${
-                        coordinates
-                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-600'
-                          : 'bg-sky-500/20 border-sky-500 text-sky-600'
-                      }`}
-                    >
-                      <MapPin className="h-6 w-6" />
-                    </div>
-                    <div className="bg-slate-900 text-white text-[11px] font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-1.5">
-                      <span>{sector} · Chandigarh UT</span>
-                      {coordinates && (
-                        <span className="text-[9px] bg-emerald-500 text-white px-1.5 py-0.2 rounded-full font-semibold">
-                          GPS Locked
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                  {/* Sector landmark anchors (Clickable) */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCenterOnSector('Sector 1');
+                    }}
+                    className="absolute top-3 left-1/2 -translate-x-1/2 text-[10px] text-slate-600 font-bold bg-white/90 hover:bg-sky-100 px-2 py-0.5 rounded border border-slate-200 shadow-xs transition-colors"
+                  >
+                    Sec 1 (Capitol)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCenterOnSector('Sector 17');
+                    }}
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[10px] text-slate-700 font-bold bg-white/90 hover:bg-sky-100 px-2 py-0.5 rounded border border-slate-300 shadow-xs transition-colors"
+                  >
+                    Sec 17 (City Centre)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCenterOnSector('Sector 15');
+                    }}
+                    className="absolute top-1/3 left-6 text-[10px] text-slate-500 font-medium bg-white/80 hover:bg-sky-100 px-1.5 py-0.5 rounded border border-slate-200 transition-colors"
+                  >
+                    Sec 15
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCenterOnSector('Sector 19');
+                    }}
+                    className="absolute top-1/3 right-6 text-[10px] text-slate-500 font-medium bg-white/80 hover:bg-sky-100 px-1.5 py-0.5 rounded border border-slate-200 transition-colors"
+                  >
+                    Sec 19
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCenterOnSector('Sector 43');
+                    }}
+                    className="absolute bottom-3 left-6 text-[10px] text-slate-500 font-medium bg-white/80 hover:bg-sky-100 px-1.5 py-0.5 rounded border border-slate-200 transition-colors"
+                  >
+                    Sec 43 (ISBT)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCenterOnSector('Sector 26');
+                    }}
+                    className="absolute bottom-3 right-6 text-[10px] text-slate-500 font-medium bg-white/80 hover:bg-sky-100 px-1.5 py-0.5 rounded border border-slate-200 transition-colors"
+                  >
+                    Sec 26 (East)
+                  </button>
 
-                  {/* Decorative sector labels */}
-                  <div className="absolute top-3 left-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
-                    Sec 16
-                  </div>
-                  <div className="absolute top-3 right-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
-                    Sec 18
-                  </div>
-                  <div className="absolute bottom-3 left-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
-                    Sec 22
-                  </div>
-                  <div className="absolute bottom-3 right-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
-                    Sec 24
-                  </div>
+                  {/* Real Dynamic Map Marker - Rendered ONLY when coordinates are explicitly acquired or selected */}
+                  {coordinates ? (
+                    (() => {
+                      const pos = projectCoordinatesToPercent(
+                        coordinates.latitude,
+                        coordinates.longitude
+                      ) || { xPercent: 50, yPercent: 50 };
+                      return (
+                        <div
+                          className="absolute pointer-events-none transition-all duration-300 transform -translate-x-1/2 -translate-y-full z-20 flex flex-col items-center"
+                          style={{
+                            left: `${pos.xPercent}%`,
+                            top: `${pos.yPercent}%`,
+                          }}
+                        >
+                          <div className="bg-slate-900 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-lg whitespace-nowrap mb-1 border border-slate-700 flex items-center gap-1 animate-bounce">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                            <span>{sector}</span>
+                            <span className="font-mono text-[9px] text-slate-300">
+                              ({coordinates.latitude.toFixed(3)}, {coordinates.longitude.toFixed(3)})
+                            </span>
+                          </div>
+                          <div className="h-8 w-8 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg border-2 border-white ring-2 ring-emerald-500/30">
+                            <MapPin className="h-4 w-4" />
+                          </div>
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    /* Prompt when no coordinates exist yet - Never display a false marker */
+                    <div className="relative z-10 text-center p-3 rounded-xl bg-white/90 border border-slate-200 backdrop-blur-xs shadow-xs max-w-xs pointer-events-none">
+                      <Crosshair className="h-5 w-5 text-sky-600 mx-auto mb-1 animate-pulse" />
+                      <p className="text-xs font-bold text-slate-800">
+                        No Coordinates Pinned
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Click anywhere on this grid to set a pin, or use "Detect Location (GPS)" above.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
-                <div className="px-4 py-2 bg-sky-50 border-t border-sky-200">
-                  <p className="text-[11px] text-sky-700 font-medium flex items-center gap-1">
-                    <Navigation className="h-3 w-3" />
-                    {coordinates
-                      ? 'GPS coordinates recorded and linked to this complaint. You can adjust landmark or address above as needed.'
-                      : 'Location will be associated with your selected sector above. Add a landmark or detect GPS coordinates for precise field crew routing.'}
+                {/* Footer Controls & Instructions */}
+                <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <p className="text-[11px] text-slate-600 flex items-center gap-1.5">
+                    <Navigation className="h-3.5 w-3.5 text-sky-600 shrink-0" />
+                    <span>
+                      {coordinates
+                        ? `Pin set at ${formatCoordinates(coordinates.latitude, coordinates.longitude)}. Click anywhere to reposition.`
+                        : 'Click on grid or select a sector above to position coordinates.'}
+                    </span>
                   </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleCenterOnSector(sector)}
+                      className="text-[11px] text-sky-700 hover:text-sky-900 font-semibold underline"
+                    >
+                      Center pin on {sector}
+                    </button>
+                    {coordinates && (
+                      <button
+                        type="button"
+                        onClick={handleClearLocation}
+                        className="text-[11px] text-red-600 hover:text-red-800 font-semibold underline"
+                      >
+                        Remove pin
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

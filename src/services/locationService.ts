@@ -60,9 +60,9 @@ export function formatCoordinates(latitude: number, longitude: number): string {
 
 /**
  * Standard sector centroids for the Union Territory of Chandigarh.
- * Used strictly for advisory proximity suggestions when GPS is obtained.
+ * Used for advisory proximity suggestions and interactive map navigation.
  */
-const CHANDIGARH_SECTOR_CENTROIDS: Record<string, { lat: number; lng: number }> = {
+export const CHANDIGARH_SECTOR_CENTROIDS: Record<string, { lat: number; lng: number }> = {
   'Sector 1': { lat: 30.7583, lng: 76.8041 },
   'Sector 2': { lat: 30.7554, lng: 76.8001 },
   'Sector 3': { lat: 30.7505, lng: 76.7955 },
@@ -96,6 +96,60 @@ const CHANDIGARH_SECTOR_CENTROIDS: Record<string, { lat: number; lng: number }> 
   'Sector 35': { lat: 30.7305, lng: 76.7455 },
   'Sector 43': { lat: 30.7185, lng: 76.7425 },
 };
+
+export const CHANDIGARH_GEO_BOUNDS = {
+  minLat: 30.68,
+  maxLat: 30.78,
+  minLng: 76.72,
+  maxLng: 76.84,
+};
+
+/**
+ * Returns centroid coordinates for a given Chandigarh sector.
+ */
+export function getSectorCoordinates(
+  sectorName: string
+): { latitude: number; longitude: number } | null {
+  const match = CHANDIGARH_SECTOR_CENTROIDS[sectorName];
+  if (!match) return null;
+  return { latitude: match.lat, longitude: match.lng };
+}
+
+/**
+ * Projects a geographical coordinate (lat, lng) to container relative percentages (x%, y%).
+ * Returns null if coordinates are invalid.
+ */
+export function projectCoordinatesToPercent(
+  latitude: number,
+  longitude: number,
+  bounds = CHANDIGARH_GEO_BOUNDS
+): { xPercent: number; yPercent: number } | null {
+  if (!isValidCoordinates(latitude, longitude)) return null;
+  const x = ((longitude - bounds.minLng) / (bounds.maxLng - bounds.minLng)) * 100;
+  const y = ((bounds.maxLat - latitude) / (bounds.maxLat - bounds.minLat)) * 100;
+  return {
+    xPercent: Math.max(4, Math.min(96, Number(x.toFixed(2)))),
+    yPercent: Math.max(6, Math.min(94, Number(y.toFixed(2)))),
+  };
+}
+
+/**
+ * Projects container relative percentages (x%, y%) to geographical coordinates.
+ */
+export function projectPercentToCoordinates(
+  xPercent: number,
+  yPercent: number,
+  bounds = CHANDIGARH_GEO_BOUNDS
+): { latitude: number; longitude: number } {
+  const clampedX = Math.max(0, Math.min(100, xPercent));
+  const clampedY = Math.max(0, Math.min(100, yPercent));
+  const longitude = bounds.minLng + (clampedX / 100) * (bounds.maxLng - bounds.minLng);
+  const latitude = bounds.maxLat - (clampedY / 100) * (bounds.maxLat - bounds.minLat);
+  return {
+    latitude: Number(latitude.toFixed(4)),
+    longitude: Number(longitude.toFixed(4)),
+  };
+}
 
 /**
  * Suggests the nearest Chandigarh sector based on coordinate proximity.

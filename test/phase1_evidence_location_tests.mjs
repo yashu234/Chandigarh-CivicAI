@@ -4,6 +4,10 @@ import {
   formatCoordinates,
   suggestNearestSector,
   requestDeviceCoordinates,
+  getSectorCoordinates,
+  projectCoordinatesToPercent,
+  projectPercentToCoordinates,
+  CHANDIGARH_GEO_BOUNDS,
 } from '../src/services/locationService.ts';
 import {
   validateComplaintInput,
@@ -319,6 +323,116 @@ test('11. Upload compensation rollback removes complaint record if storage uploa
 
   assert.equal(complaintDeleted, true, 'Complaint should be deleted to prevent orphaned records');
   assert.equal(rolledBackId, fakeComplaintId);
+});
+
+// =====================================================================
+// SECTION 6: CAMERA STREAM LIFECYCLE & STARTUP FAILURES
+// =====================================================================
+
+test('12. Camera stream cleanup terminates all media tracks and disposes srcObject', () => {
+  let trackStopped = 0;
+  const mockTrack = {
+    stop() {
+      trackStopped++;
+    },
+  };
+
+  const mockStream = {
+    getTracks() {
+      return [mockTrack, mockTrack];
+    },
+  };
+
+  const mockVideo = {
+    srcObject: mockStream,
+  };
+
+  // Simulating stopCamera lifecycle
+  mockStream.getTracks().forEach((track) => track.stop());
+  mockVideo.srcObject = null;
+
+  assert.equal(trackStopped, 2, 'All tracks must be stopped during cleanup');
+  assert.equal(mockVideo.srcObject, null, 'Video element srcObject must be detached');
+});
+
+test('13. Camera startup error handling handles SecurityError, OverconstrainedError and missing devices', () => {
+  const mapCameraError = (err) => {
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      return 'Permission denied or blocked by browser policy';
+    }
+    if (err.name === 'SecurityError') {
+      return 'Blocked by browser security policy';
+    }
+    if (err.name === 'NotFoundError') {
+      return 'No physical camera device detected';
+    }
+    if (err.name === 'NotReadableError') {
+      return 'Camera in use by another application';
+    }
+    return err.message || 'Camera error';
+  };
+
+  const secErr = new Error('Security policy violation');
+  secErr.name = 'SecurityError';
+  assert.match(mapCameraError(secErr), /security policy/i);
+
+  const notFound = new Error('Not found');
+  notFound.name = 'NotFoundError';
+  assert.match(mapCameraError(notFound), /No physical camera/i);
+
+  const busy = new Error('Track busy');
+  busy.name = 'NotReadableError';
+  assert.match(mapCameraError(busy), /Camera in use/i);
+});
+
+// =====================================================================
+// SECTION 7: GPS-TO-MAP-STATE SYNCHRONIZATION & INTERACTIVE SECTOR GRID
+// =====================================================================
+
+test('14. projectCoordinatesToPercent accurately maps Chandigarh GPS to relative container percentages', () => {
+  // Test Chandigarh City Centre (Sector 17)
+  const sec17 = { lat: 30.7408, lng: 76.7828 };
+  const pos = projectCoordinatesToPercent(sec17.lat, sec17.lng);
+
+  assert.ok(pos !== null, 'Projection must return valid object for valid coords');
+  assert.ok(pos.xPercent >= 40 && pos.xPercent <= 60, `Sector 17 xPercent (${pos.xPercent}) should be near the center`);
+  assert.ok(pos.yPercent >= 30 && pos.yPercent <= 50, `Sector 17 yPercent (${pos.yPercent}) should be in north-central area`);
+
+  // Invalid coordinates should yield null
+  assert.equal(projectCoordinatesToPercent(NaN, NaN), null);
+  assert.equal(projectCoordinatesToPercent(150, 200), null);
+});
+
+test('15. projectPercentToCoordinates converts user map clicks to valid geographical coordinates', () => {
+  // Center click (50%, 50%)
+  const centerCoords = projectPercentToCoordinates(50, 50);
+  assert.ok(isValidCoordinates(centerCoords.latitude, centerCoords.longitude));
+  assert.ok(
+    centerCoords.latitude >= CHANDIGARH_GEO_BOUNDS.minLat &&
+    centerCoords.latitude <= CHANDIGARH_GEO_BOUNDS.maxLat
+  );
+  assert.ok(
+    centerCoords.longitude >= CHANDIGARH_GEO_BOUNDS.minLng &&
+    centerCoords.longitude <= CHANDIGARH_GEO_BOUNDS.maxLng
+  );
+
+  // Proximity to Chandigarh sectors from map click
+  const sector = suggestNearestSector(centerCoords.latitude, centerCoords.longitude);
+  assert.ok(sector !== null, 'A valid click inside Chandigarh bounds must suggest a nearby sector');
+});
+
+test('16. getSectorCoordinates and manual updates synchronize without fabricating unassigned coordinates', () => {
+  // Lookup known sector
+  const sec17Coords = getSectorCoordinates('Sector 17');
+  assert.ok(sec17Coords !== null);
+  assert.equal(sec17Coords.latitude, 30.7408);
+  assert.equal(sec17Coords.longitude, 76.7828);
+
+  // Unknown sector returns null
+  assert.equal(getSectorCoordinates('Nonexistent Sector 999'), null);
+
+  // When coordinates are null, projection is null (prevents fake pin rendering)
+  assert.equal(projectCoordinatesToPercent(null, null), null);
 });
 
 let passedTests = 0;

@@ -29,12 +29,48 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => {
-        track.stop();
+        try {
+          track.stop();
+        } catch {
+          // ignore track stop errors during cleanup
+        }
       });
       streamRef.current = null;
     }
+    if (videoRef.current) {
+      try {
+        videoRef.current.srcObject = null;
+      } catch {
+        // ignore
+      }
+    }
     setStream(null);
   }, []);
+
+  const attachStreamToVideo = useCallback((mediaStream: MediaStream, videoEl: HTMLVideoElement | null) => {
+    if (!videoEl) return;
+    try {
+      if (videoEl.srcObject !== mediaStream) {
+        videoEl.srcObject = mediaStream;
+      }
+      const playPromise = videoEl.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          // AbortError or NotAllowedError when quickly closing or tab backgrounded
+          console.warn('[CameraCaptureModal] Safe video play notification:', err);
+        });
+      }
+    } catch (attachErr) {
+      console.warn('[CameraCaptureModal] Video srcObject attachment notice:', attachErr);
+    }
+  }, []);
+
+  const setVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node;
+    if (node && streamRef.current) {
+      attachStreamToVideo(streamRef.current, node);
+    }
+  }, [attachStreamToVideo]);
 
   const startCamera = useCallback(
     async (deviceId?: string) => {
@@ -42,6 +78,15 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
       setCameraError(null);
       setIsPermissionDenied(false);
       setIsInitializing(true);
+
+      // Verify HTTPS / Secure Context
+      if (typeof window !== 'undefined' && window.isSecureContext === false) {
+        setIsInitializing(false);
+        setCameraError(
+          'In-browser camera access requires a secure connection (HTTPS). Please open the website via HTTPS or select an existing photo.'
+        );
+        return;
+      }
 
       if (
         typeof navigator === 'undefined' ||
@@ -56,24 +101,39 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
       }
 
       try {
-        const constraints: MediaStreamConstraints = {
-          video: deviceId
-            ? { deviceId: { exact: deviceId } }
+        let mediaStream: MediaStream;
+        const targetDeviceId = deviceId || activeDeviceId || undefined;
+
+        const primaryConstraints: MediaStreamConstraints = {
+          video: targetDeviceId
+            ? { deviceId: { exact: targetDeviceId } }
             : {
                 facingMode: { ideal: 'environment' },
-                width: { ideal: 1920 },
-                height: { ideal: 1080 },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
               },
           audio: false,
         };
 
-        const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia(primaryConstraints);
+        } catch (constraintErr: unknown) {
+          console.warn(
+            '[CameraCaptureModal] High-resolution constraints failed, falling back to basic video constraints:',
+            constraintErr
+          );
+          // Fallback to basic unconstrained video
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: targetDeviceId ? { deviceId: { exact: targetDeviceId } } : true,
+            audio: false,
+          });
+        }
+
         streamRef.current = mediaStream;
         setStream(mediaStream);
 
         if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-          await videoRef.current.play().catch(() => {});
+          attachStreamToVideo(mediaStream, videoRef.current);
         }
 
         // Enumerate video devices for camera switching
@@ -81,7 +141,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
         const cameras = allDevices.filter((d) => d.kind === 'videoinput');
         setVideoDevices(cameras);
 
-        if (!activeDeviceId && cameras.length > 0) {
+        if (cameras.length > 0 && !targetDeviceId) {
           const currentTrack = mediaStream.getVideoTracks()[0];
           const currentSettings = currentTrack?.getSettings?.();
           setActiveDeviceId(currentSettings?.deviceId || cameras[0].deviceId);
@@ -96,7 +156,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
           if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
             setIsPermissionDenied(true);
             setCameraError(
-              'Camera permission was denied. Please grant camera permission in your browser or select an existing photo from your device.'
+              'Camera permission was denied or blocked by browser policy. Please allow camera access in your browser address bar or select an existing photo.'
             );
           } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
             setCameraError(
@@ -104,7 +164,11 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
             );
           } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
             setCameraError(
-              'Your camera is currently in use by another application. Please close other camera apps and retry.'
+              'Your camera is currently in use by another application or tab. Please close other camera apps and retry.'
+            );
+          } else if (err.name === 'SecurityError') {
+            setCameraError(
+              'Camera access was blocked by browser security policy. Please check site permissions in your browser or select an existing photo.'
             );
           } else {
             setCameraError(err.message || 'Unable to initialize device camera.');
@@ -114,7 +178,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
         }
       }
     },
-    [stopCamera, activeDeviceId]
+    [stopCamera, activeDeviceId, attachStreamToVideo]
   );
 
   useEffect(() => {
@@ -127,7 +191,16 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
     return () => {
       stopCamera();
     };
-  }, [isOpen, startCamera, stopCamera]);
+    // Only react to modal open/close changes to prevent re-initialization loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // Synchronize stream changes to video element
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      attachStreamToVideo(stream, videoRef.current);
+    }
+  }, [stream, attachStreamToVideo]);
 
   const handleSwitchCamera = () => {
     if (videoDevices.length <= 1) return;
@@ -275,7 +348,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
             )}
 
             <video
-              ref={videoRef}
+              ref={setVideoRef}
               autoPlay
               playsInline
               muted
