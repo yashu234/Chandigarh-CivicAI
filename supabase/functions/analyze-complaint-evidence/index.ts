@@ -493,6 +493,9 @@ Please analyze the attached civic grievance photograph and citizen statement:
 }
 `.trim();
 
+  const rawMime = (evidence.mime_type || '').toLowerCase().trim();
+  const normalizedMime = rawMime === 'image/jpg' ? 'image/jpeg' : rawMime || 'image/jpeg';
+
   const requestPayload = {
     system_instruction: {
       parts: [{ text: CIVIC_AI_SYSTEM_INSTRUCTION }],
@@ -502,7 +505,7 @@ Please analyze the attached civic grievance photograph and citizen statement:
         parts: [
           {
             inline_data: {
-              mime_type: evidence.mime_type,
+              mime_type: normalizedMime,
               data: base64Bytes,
             },
           },
@@ -515,8 +518,17 @@ Please analyze the attached civic grievance photograph and citizen statement:
     generationConfig: {
       response_mime_type: 'application/json',
       temperature: 0.2,
+      max_output_tokens: 1024,
     },
   };
+
+  // Configurable inference timeout (default: 60s, bounds: 10s–120s to stay safely within 150s platform limit)
+  const envTimeout = Deno.env.get('GEMINI_TIMEOUT_MS');
+  const timeoutMs =
+    envTimeout && !isNaN(Number(envTimeout)) && Number(envTimeout) >= 10000 && Number(envTimeout) <= 120000
+      ? Number(envTimeout)
+      : 60000;
+  const timeoutSec = Math.round(timeoutMs / 1000);
 
   let aiResponse: Response;
   try {
@@ -527,7 +539,7 @@ Please analyze the attached civic grievance photograph and citizen statement:
         'x-goog-api-key': geminiApiKey,
       },
       body: JSON.stringify(requestPayload),
-      signal: AbortSignal.timeout(25000), // 25s timeout to prevent hanging connections
+      signal: AbortSignal.timeout(timeoutMs), // Abortable request cleanly cancels underlying connection on timeout
     });
   } catch (fetchErr: unknown) {
     const isTimeout =
@@ -537,10 +549,10 @@ Please analyze the attached civic grievance photograph and citizen statement:
         fetchErr.message?.includes('timed out'));
 
     const errMessage = isTimeout
-      ? 'AI provider inference timed out after 25 seconds. Please retry with a clearer or smaller image.'
+      ? `AI provider inference timed out after ${timeoutSec} seconds. Please retry with a clearer or smaller image.`
       : 'Network connection to AI provider failed. Please check network connectivity and retry.';
 
-    console.error(`[EdgeFunction] Gemini fetch failure: model=${modelVersion} timeout=${isTimeout}`);
+    console.error(`[EdgeFunction] Gemini fetch failure: model=${modelVersion} timeout=${isTimeout} timeoutSec=${timeoutSec}`);
 
     return new Response(
       JSON.stringify({

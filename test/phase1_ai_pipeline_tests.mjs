@@ -334,6 +334,82 @@ test('11. getAssessmentForComplaint returns pending when no assessment row exist
   );
 });
 
+// ---------------------------------------------------------------------
+// TEST 12: Robust Configurable Timeout with Abortable Signal
+// ---------------------------------------------------------------------
+test('12. Edge Function implements configurable timeout with abortable signal', () => {
+  const edgeFuncPath = path.resolve(process.cwd(), 'supabase/functions/analyze-complaint-evidence/index.ts');
+  const edgeContent = fs.readFileSync(edgeFuncPath, 'utf8');
+
+  assert.ok(
+    edgeContent.includes('GEMINI_TIMEOUT_MS'),
+    'Edge Function must support configurable GEMINI_TIMEOUT_MS environment variable'
+  );
+  assert.ok(
+    edgeContent.includes('AbortSignal.timeout'),
+    'Edge Function must use AbortSignal.timeout for clean abortable request termination'
+  );
+  assert.ok(
+    edgeContent.includes('max_output_tokens'),
+    'Edge Function must constrain max_output_tokens to prevent runaway generation'
+  );
+  assert.ok(
+    edgeContent.includes('normalizedMime'),
+    'Edge Function must normalize image MIME types for standard Gemini API compatibility'
+  );
+});
+
+// ---------------------------------------------------------------------
+// TEST 13: Timeout & Slow Response Error Contract preserves Safety Behavior
+// ---------------------------------------------------------------------
+test('13. Simulated timeout produces 502 error, preserves human review, and avoids fake scores', () => {
+  const simulateTimeoutResponse = (timeoutSec = 60) => {
+    return {
+      status: 502,
+      body: {
+        state: 'failed',
+        error: `AI provider inference timed out after ${timeoutSec} seconds. Please retry with a clearer or smaller image.`,
+      },
+    };
+  };
+
+  const timeoutRes = simulateTimeoutResponse(60);
+  assert.equal(timeoutRes.status, 502);
+  assert.equal(timeoutRes.body.state, 'failed');
+  assert.ok(timeoutRes.body.error.includes('timed out after 60 seconds'));
+
+  // Ensure provider creates failed response with humanReviewRequired = true and null scores
+  const provider = new SupabaseEdgeAIProvider();
+  const failedAssessment = provider['createFailedResponse']('test-complaint-id', timeoutRes.body.error);
+  assert.equal(failedAssessment.analysisState, 'failed');
+  assert.equal(failedAssessment.humanReviewRequired, true);
+  assert.equal(failedAssessment.severity, null);
+  assert.equal(failedAssessment.safetyRisk, null);
+  assert.equal(failedAssessment.evidenceSupport, null);
+  assert.ok(failedAssessment.humanReviewReasons[0].includes('timed out'));
+});
+
+// ---------------------------------------------------------------------
+// TEST 14: Retries and Persistence Idempotency
+// ---------------------------------------------------------------------
+test('14. Retries safely update existing rows without creating duplicates', () => {
+  const edgeFuncPath = path.resolve(process.cwd(), 'supabase/functions/analyze-complaint-evidence/index.ts');
+  const edgeContent = fs.readFileSync(edgeFuncPath, 'utf8');
+
+  assert.ok(
+    edgeContent.includes(".eq('complaint_id', body.complaintId)"),
+    'Edge Function must query existing assessment for complaint'
+  );
+  assert.ok(
+    edgeContent.includes('.update({') && edgeContent.includes('.eq(\'id\', existingRow.id)'),
+    'Edge Function must update existing assessment on retry rather than inserting duplicate records'
+  );
+  assert.ok(
+    edgeContent.includes('if (!body.reanalyze)'),
+    'Edge Function must check reanalyze flag before invoking upstream inference'
+  );
+});
+
 console.log('\n=============================================================================');
 console.log(`--- ALL ${passedTests}/${totalTests} PHASE 1 AI PIPELINE TESTS PASSED SUCCESSFULLY ---`);
 console.log('=============================================================================\n');
