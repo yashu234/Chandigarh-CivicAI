@@ -21,6 +21,11 @@ import {
   RefreshCw,
   Clock,
   LogIn,
+  Camera,
+  Upload,
+  Crosshair,
+  Smartphone,
+  Trash2,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { createComplaint, validateComplaintInput } from '../services/complaintsService';
@@ -30,12 +35,21 @@ import {
   type StructuredAIAssessment,
   type AIAnalysisState,
 } from '../services/ai/aiAssessmentService';
+import { CameraCaptureModal } from '../components/camera/CameraCaptureModal';
+import {
+  requestDeviceCoordinates,
+  formatCoordinates,
+  suggestNearestSector,
+  type GeoCoordinates,
+} from '../services/locationService';
 
 interface SubmissionSuccessData {
   complaint: ComplaintRow;
   trackingId: string;
   imageFileName?: string;
   imagePreviewUrl?: string | null;
+  imageSource?: 'camera' | 'file' | null;
+  coordinates?: GeoCoordinates | null;
   aiAssessment?: StructuredAIAssessment | null;
   aiState?: AIAnalysisState;
   aiError?: string | null;
@@ -54,11 +68,21 @@ export const ReportIssuePage: React.FC = () => {
   const [address, setAddress] = useState('');
   const [landmark, setLandmark] = useState('');
 
-  // Image State
+  // Image & Camera State
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imageSource, setImageSource] = useState<'camera' | 'file' | null>(null);
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mobileCameraInputRef = useRef<HTMLInputElement>(null);
+
+  // Location & Geolocation State
+  const [coordinates, setCoordinates] = useState<GeoCoordinates | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [locationSuccessMsg, setLocationSuccessMsg] = useState<string | null>(null);
+  const [suggestedSector, setSuggestedSector] = useState<string | null>(null);
 
   // Submission State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -74,10 +98,10 @@ export const ReportIssuePage: React.FC = () => {
     }
   }, [authLoading, isAuthenticated, navigate, location.pathname]);
 
-  // File Handling
-  const handleFileSelection = (file: File) => {
+  // File & Camera Handling
+  const handleFileSelection = (file: File, source: 'camera' | 'file' = 'file') => {
     const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (!validTypes.includes(file.type)) {
+    if (!validTypes.includes(file.type.toLowerCase())) {
       setFormError('Unsupported file type. Please upload a JPG, JPEG, PNG, or WEBP image.');
       return;
     }
@@ -86,16 +110,25 @@ export const ReportIssuePage: React.FC = () => {
       return;
     }
     setFormError(null);
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl);
+    }
     setImageFile(file);
+    setImageSource(source);
     const url = URL.createObjectURL(file);
     setImagePreviewUrl(url);
+  };
+
+  const handlePhotoCaptured = (file: File) => {
+    handleFileSelection(file, 'camera');
+    setIsCameraModalOpen(false);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelection(e.dataTransfer.files[0]);
+      handleFileSelection(e.dataTransfer.files[0], 'file');
     }
   };
 
@@ -114,9 +147,65 @@ export const ReportIssuePage: React.FC = () => {
     }
     setImageFile(null);
     setImagePreviewUrl(null);
+    setImageSource(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+    if (mobileCameraInputRef.current) {
+      mobileCameraInputRef.current.value = '';
+    }
+  };
+
+  // Location / GPS Handlers
+  const handleDetectLocation = async () => {
+    setIsLocating(true);
+    setLocationError(null);
+    setLocationSuccessMsg(null);
+    setSuggestedSector(null);
+
+    const result = await requestDeviceCoordinates({
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 0,
+    });
+
+    setIsLocating(false);
+
+    if (result.success && result.coordinates) {
+      setCoordinates(result.coordinates);
+      const formatted = formatCoordinates(
+        result.coordinates.latitude,
+        result.coordinates.longitude
+      );
+      const accStr = result.coordinates.accuracy
+        ? ` (accuracy ±${Math.round(result.coordinates.accuracy)}m)`
+        : '';
+      setLocationSuccessMsg(`GPS coordinates acquired: ${formatted}${accStr}`);
+
+      // Proximity suggestion for sector
+      const suggested = suggestNearestSector(
+        result.coordinates.latitude,
+        result.coordinates.longitude
+      );
+      if (suggested && CHANDIGARH_SECTORS.includes(suggested)) {
+        setSuggestedSector(suggested);
+        if (sector === 'Sector 17') {
+          setSector(suggested);
+        }
+      }
+    } else {
+      setLocationError(
+        result.error ||
+          'Unable to acquire device location. You can select your Chandigarh sector manually below.'
+      );
+    }
+  };
+
+  const handleClearLocation = () => {
+    setCoordinates(null);
+    setLocationSuccessMsg(null);
+    setLocationError(null);
+    setSuggestedSector(null);
   };
 
   // Submit Handler connected to real Supabase service
@@ -134,6 +223,8 @@ export const ReportIssuePage: React.FC = () => {
       description,
       category,
       sector,
+      latitude: coordinates?.latitude ?? null,
+      longitude: coordinates?.longitude ?? null,
       evidenceFile: imageFile,
     });
 
@@ -158,6 +249,8 @@ export const ReportIssuePage: React.FC = () => {
         sector,
         landmark: landmark || undefined,
         streetAddress: address || undefined,
+        latitude: coordinates?.latitude ?? null,
+        longitude: coordinates?.longitude ?? null,
         evidenceFile: imageFile,
         autoAnalyze: Boolean(imageFile),
       });
@@ -174,6 +267,8 @@ export const ReportIssuePage: React.FC = () => {
         trackingId: result.data.trackingId,
         imageFileName: imageFile?.name,
         imagePreviewUrl: result.data.evidenceSignedUrl || imagePreviewUrl,
+        imageSource,
+        coordinates,
         aiAssessment: result.data.aiAssessment,
         aiState: result.data.aiState,
         aiError: result.data.aiError,
@@ -253,6 +348,7 @@ export const ReportIssuePage: React.FC = () => {
     setAddress('');
     setLandmark('');
     handleRemoveImage();
+    handleClearLocation();
     setSuccessData(null);
     setFormError(null);
   };
@@ -329,10 +425,38 @@ export const ReportIssuePage: React.FC = () => {
                   {complaint.status}
                 </span>
               </div>
+              {successData.coordinates && (
+                <div className="text-sky-800 flex items-center gap-1.5 mt-2 font-medium">
+                  <MapPin className="h-3.5 w-3.5 shrink-0 text-sky-600" />
+                  <span>
+                    GPS Pin:{' '}
+                    <span className="font-mono font-bold">
+                      {formatCoordinates(
+                        successData.coordinates.latitude,
+                        successData.coordinates.longitude
+                      )}
+                    </span>
+                    {successData.coordinates.accuracy && (
+                      <span className="text-[10px] text-sky-600 ml-1">
+                        (±{Math.round(successData.coordinates.accuracy)}m)
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
               {imageFileName && (
-                <div className="text-emerald-700 flex items-center gap-1.5 mt-2 font-medium">
+                <div className="text-emerald-700 flex flex-wrap items-center gap-1.5 mt-2 font-medium">
                   <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                  <span>Photographic evidence securely uploaded ({imageFileName})</span>
+                  <span>Photographic evidence uploaded ({imageFileName})</span>
+                  {successData.imageSource === 'camera' ? (
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-semibold border border-emerald-300">
+                      Captured via Camera
+                    </span>
+                  ) : (
+                    <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-semibold border border-slate-300">
+                      Selected from Device
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -614,7 +738,7 @@ export const ReportIssuePage: React.FC = () => {
         <Card>
           <CardHeader
             title="B. Photographic Evidence (Optional)"
-            subtitle="Upload a clear photograph of the issue to private storage"
+            subtitle="Capture an in-situ photo using your camera or upload an image to private storage"
             action={
               <Badge variant="neutral" size="sm">
                 Private Storage Bucket
@@ -624,46 +748,104 @@ export const ReportIssuePage: React.FC = () => {
 
           <div className="space-y-4">
             <p className="text-xs text-slate-600 font-medium">
-              Upload a clear photograph of the civic issue. Photographic evidence is stored in a private Supabase bucket and will be analyzed during AI triage.
+              Attach photographic evidence of the civic issue. Evidence is stored securely in private municipal storage with Row Level Security.
             </p>
 
-            {/* Hidden native input */}
+            {/* Hidden native input for general file browsing */}
             <input
               ref={fileInputRef}
               type="file"
               accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
               onChange={(e) => {
                 if (e.target.files && e.target.files[0]) {
-                  handleFileSelection(e.target.files[0]);
+                  handleFileSelection(e.target.files[0], 'file');
+                }
+              }}
+              className="hidden"
+            />
+
+            {/* Hidden native input for direct mobile camera capture */}
+            <input
+              ref={mobileCameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleFileSelection(e.target.files[0], 'camera');
                 }
               }}
               className="hidden"
             />
 
             {!imagePreviewUrl ? (
-              <div
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-                  isDragging
-                    ? 'border-blue-500 bg-blue-50/50'
-                    : 'border-slate-300 bg-slate-50/60 hover:bg-slate-100/70 hover:border-slate-400'
-                }`}
-              >
-                <UploadCloud className="h-10 w-10 text-slate-400 mx-auto mb-3" />
-                <div className="text-sm font-semibold text-slate-800">
-                  Drag and drop photograph here, or{' '}
-                  <span className="text-blue-600 underline">browse computer</span>
+              <div className="space-y-3">
+                {/* Primary capture buttons */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsCameraModalOpen(true)}
+                    className="p-4 rounded-xl border-2 border-slate-200 hover:border-sky-500 bg-white hover:bg-sky-50/40 transition-all flex flex-col items-center justify-center text-center group cursor-pointer shadow-xs"
+                  >
+                    <div className="h-10 w-10 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
+                      <Camera className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-900 group-hover:text-sky-700">
+                      Open Camera Viewfinder
+                    </span>
+                    <span className="text-[11px] text-slate-500 mt-0.5">
+                      Snap photo directly using device camera
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-4 rounded-xl border-2 border-slate-200 hover:border-slate-400 bg-white hover:bg-slate-50 transition-all flex flex-col items-center justify-center text-center group cursor-pointer shadow-xs"
+                  >
+                    <div className="h-10 w-10 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
+                      <Upload className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-900 group-hover:text-slate-800">
+                      Select Existing Image
+                    </span>
+                    <span className="text-[11px] text-slate-500 mt-0.5">
+                      Browse JPG, PNG, or WEBP from device
+                    </span>
+                  </button>
                 </div>
-                <p className="text-xs text-slate-500 mt-1.5">
-                  Supported formats: JPG, JPEG, PNG, WEBP (Max 10MB)
-                </p>
-                <div className="mt-4">
-                  <Button type="button" variant="outline" size="sm">
-                    Select Image File
-                  </Button>
+
+                {/* Mobile direct camera fallback button */}
+                <div className="sm:hidden text-center">
+                  <button
+                    type="button"
+                    onClick={() => mobileCameraInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-900 font-medium py-1 px-2.5 rounded-lg border border-slate-200 bg-slate-50"
+                  >
+                    <Smartphone className="h-3.5 w-3.5 text-slate-500" />
+                    Direct Mobile Camera Launcher
+                  </button>
+                </div>
+
+                {/* Drag and Drop Zone */}
+                <div
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+                    isDragging
+                      ? 'border-blue-500 bg-blue-50/50'
+                      : 'border-slate-300 bg-slate-50/60 hover:bg-slate-100/70 hover:border-slate-400'
+                  }`}
+                >
+                  <UploadCloud className="h-8 w-8 text-slate-400 mx-auto mb-2" />
+                  <div className="text-xs font-semibold text-slate-700">
+                    Or drag and drop photo file here (Max 10MB)
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Accepted: JPG, JPEG, PNG, WEBP
+                  </p>
                 </div>
               </div>
             ) : (
@@ -684,17 +866,57 @@ export const ReportIssuePage: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-slate-600 px-1">
-                  <span className="font-mono">
-                    {imageFile?.name} ({(imageFile ? imageFile.size / 1024 : 0).toFixed(1)} KB)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleRemoveImage}
-                    className="text-red-600 hover:underline font-medium"
-                  >
-                    Remove and change photo
-                  </button>
+                {/* Metadata & Source Tagging */}
+                <div className="p-3 bg-white border border-slate-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      {imageSource === 'camera' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          <Camera className="h-3 w-3" /> Captured via Camera
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-800 border border-slate-300">
+                          <Upload className="h-3 w-3" /> Selected from Device Files
+                        </span>
+                      )}
+                      <span className="font-mono text-slate-600 text-[11px]">
+                        {imageFile?.name} ({(imageFile ? imageFile.size / 1024 : 0).toFixed(1)} KB)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {imageSource === 'camera' ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsCameraModalOpen(true)}
+                        leftIcon={<Camera className="h-3.5 w-3.5" />}
+                      >
+                        Retake Photo
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => fileInputRef.current?.click()}
+                        leftIcon={<Upload className="h-3.5 w-3.5" />}
+                      >
+                        Change Image
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleRemoveImage}
+                      leftIcon={<Trash2 className="h-3.5 w-3.5 text-red-600" />}
+                    >
+                      Remove
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -712,10 +934,82 @@ export const ReportIssuePage: React.FC = () => {
         <Card>
           <CardHeader
             title="C. Location Information"
-            subtitle="Specify the Chandigarh sector and nearby landmark"
+            subtitle="Specify the Chandigarh sector and nearby landmark, or detect coordinates via GPS"
           />
 
           <div className="space-y-4">
+            {/* Geolocation Detection Card */}
+            <div className="p-4 rounded-xl border border-sky-100 bg-sky-50/50 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Crosshair className="h-4 w-4 text-sky-600 shrink-0" />
+                    <span className="text-xs font-bold text-slate-900">
+                      Device GPS Location (Optional)
+                    </span>
+                    {coordinates && (
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold border border-emerald-300">
+                        GPS Active
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-600">
+                    Request exact coordinates from device GPS for precise field routing. Completely optional — manual sector entry is always accepted.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDetectLocation}
+                    isLoading={isLocating}
+                    disabled={isLocating}
+                    leftIcon={!isLocating ? <Navigation className="h-3.5 w-3.5 text-sky-600" /> : undefined}
+                  >
+                    {isLocating ? 'Acquiring GPS...' : coordinates ? 'Update GPS Pin' : 'Detect Location (GPS)'}
+                  </Button>
+                  {coordinates && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleClearLocation}
+                      title="Remove captured GPS coordinates"
+                    >
+                      Clear Pin
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Status messages for Geolocation */}
+              {locationSuccessMsg && (
+                <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span className="font-medium">{locationSuccessMsg}</span>
+                  </div>
+                  {suggestedSector && (
+                    <span className="text-[11px] bg-white text-emerald-800 px-2 py-0.5 rounded border border-emerald-200 shrink-0 font-medium">
+                      Matched: {suggestedSector}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {locationError && (
+                <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold block">GPS Notice</span>
+                    <span>{locationError}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label
@@ -737,6 +1031,15 @@ export const ReportIssuePage: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                {suggestedSector && sector !== suggestedSector && (
+                  <button
+                    type="button"
+                    onClick={() => setSector(suggestedSector)}
+                    className="text-[11px] text-sky-600 hover:underline mt-1 font-medium inline-flex items-center gap-1"
+                  >
+                    <span>Nearby GPS suggests: <strong>{suggestedSector}</strong> (click to apply)</span>
+                  </button>
+                )}
               </div>
 
               <div>
@@ -770,35 +1073,67 @@ export const ReportIssuePage: React.FC = () => {
                     <MapPin className="h-3.5 w-3.5 text-sky-400" />
                     Target: {sector}, Union Territory of Chandigarh
                   </span>
-                  <span className="text-[10px] text-sky-400 font-semibold tracking-wide uppercase">30.7333° N, 76.7794° E</span>
+                  <span className="text-[10px] text-sky-400 font-semibold tracking-wide uppercase font-mono">
+                    {coordinates
+                      ? `GPS: ${formatCoordinates(coordinates.latitude, coordinates.longitude)}`
+                      : '30.7333° N, 76.7794° E'}
+                  </span>
                 </div>
 
                 {/* Sector grid visual */}
                 <div className="relative bg-gradient-to-br from-sky-50 to-slate-100 p-5 h-40 flex items-center justify-center overflow-hidden">
                   {/* Background grid lines */}
-                  <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(rgba(14,165,233,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(14,165,233,0.08) 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      backgroundImage:
+                        'linear-gradient(rgba(14,165,233,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(14,165,233,0.08) 1px, transparent 1px)',
+                      backgroundSize: '24px 24px',
+                    }}
+                  />
 
                   {/* Center pin */}
                   <div className="relative z-10 flex flex-col items-center gap-2">
-                    <div className="h-12 w-12 rounded-full bg-sky-500/20 border-2 border-sky-500 flex items-center justify-center animate-pulse">
-                      <MapPin className="h-6 w-6 text-sky-600" />
+                    <div
+                      className={`h-12 w-12 rounded-full border-2 flex items-center justify-center animate-pulse ${
+                        coordinates
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-600'
+                          : 'bg-sky-500/20 border-sky-500 text-sky-600'
+                      }`}
+                    >
+                      <MapPin className="h-6 w-6" />
                     </div>
-                    <div className="bg-slate-900 text-white text-[11px] font-bold px-3 py-1 rounded-full shadow-md">
-                      {sector} · Chandigarh UT
+                    <div className="bg-slate-900 text-white text-[11px] font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-1.5">
+                      <span>{sector} · Chandigarh UT</span>
+                      {coordinates && (
+                        <span className="text-[9px] bg-emerald-500 text-white px-1.5 py-0.2 rounded-full font-semibold">
+                          GPS Locked
+                        </span>
+                      )}
                     </div>
                   </div>
 
                   {/* Decorative sector labels */}
-                  <div className="absolute top-3 left-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">Sec 16</div>
-                  <div className="absolute top-3 right-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">Sec 18</div>
-                  <div className="absolute bottom-3 left-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">Sec 22</div>
-                  <div className="absolute bottom-3 right-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">Sec 24</div>
+                  <div className="absolute top-3 left-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
+                    Sec 16
+                  </div>
+                  <div className="absolute top-3 right-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
+                    Sec 18
+                  </div>
+                  <div className="absolute bottom-3 left-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
+                    Sec 22
+                  </div>
+                  <div className="absolute bottom-3 right-3 text-[10px] text-slate-400 font-semibold bg-white/70 px-1.5 py-0.5 rounded border border-slate-200">
+                    Sec 24
+                  </div>
                 </div>
 
                 <div className="px-4 py-2 bg-sky-50 border-t border-sky-200">
                   <p className="text-[11px] text-sky-700 font-medium flex items-center gap-1">
                     <Navigation className="h-3 w-3" />
-                    Location will be associated with your selected sector above. Add a landmark or street address above for precise field crew routing.
+                    {coordinates
+                      ? 'GPS coordinates recorded and linked to this complaint. You can adjust landmark or address above as needed.'
+                      : 'Location will be associated with your selected sector above. Add a landmark or detect GPS coordinates for precise field crew routing.'}
                   </p>
                 </div>
               </div>
@@ -850,6 +1185,17 @@ export const ReportIssuePage: React.FC = () => {
           </Button>
         </div>
       </form>
+
+      {/* Live Camera Viewfinder Modal */}
+      <CameraCaptureModal
+        isOpen={isCameraModalOpen}
+        onClose={() => setIsCameraModalOpen(false)}
+        onPhotoCaptured={handlePhotoCaptured}
+        onFallbackToFile={() => {
+          setIsCameraModalOpen(false);
+          fileInputRef.current?.click();
+        }}
+      />
     </PageContainer>
   );
 };

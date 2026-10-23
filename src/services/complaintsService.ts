@@ -86,6 +86,18 @@ export function validateComplaintInput(input: CreateComplaintInput): string | nu
     return 'Street address must be 500 characters or fewer.';
   }
 
+  if (input.latitude !== undefined && input.latitude !== null) {
+    if (!Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90) {
+      return 'Latitude must be a valid number between -90 and 90.';
+    }
+  }
+
+  if (input.longitude !== undefined && input.longitude !== null) {
+    if (!Number.isFinite(input.longitude) || input.longitude < -180 || input.longitude > 180) {
+      return 'Longitude must be a valid number between -180 and 180.';
+    }
+  }
+
   if (input.evidenceFile) {
     const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
     if (!validTypes.includes(input.evidenceFile.type.toLowerCase())) {

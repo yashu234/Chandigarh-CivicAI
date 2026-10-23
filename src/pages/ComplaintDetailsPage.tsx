@@ -393,6 +393,11 @@ export const ComplaintDetailsPage: React.FC = () => {
                     <span className="text-slate-600">
                       {complaint.location.sector} • {complaint.location.landmark || complaint.location.address}
                     </span>
+                    {complaint.location.coordinates && (
+                      <span className="text-[11px] font-mono text-sky-700 block mt-0.5 font-medium">
+                        GPS: {complaint.location.coordinates.latitude.toFixed(4)}° N, {complaint.location.coordinates.longitude.toFixed(4)}° E
+                      </span>
+                    )}
                   </div>
                 </div>
 
